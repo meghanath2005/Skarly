@@ -131,4 +131,4 @@ Path traversal and arbitrary absolute paths are rejected.
 py -m pytest
 ```
 
-Known limitations: no billing, no advanced auth, no cloud storage orchestration, no model training, no ZIP export requirement, and no full DAW timeline.
+Known limitations: no billing, no remote identity layer, no model training, no ZIP export requirement, and no full DAW timeline.

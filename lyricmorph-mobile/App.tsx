@@ -18,21 +18,10 @@ import Svg, { Circle, Defs, LinearGradient, Path, Rect, Stop } from "react-nativ
 import { StatusBar } from "expo-status-bar";
 import * as DocumentPicker from "expo-document-picker";
 import { Audio } from "expo-av";
-import { FirebaseError, initializeApp, getApps } from "firebase/app";
-import {
-  createUserWithEmailAndPassword,
-  getAuth,
-  onAuthStateChanged,
-  signInWithEmailAndPassword,
-  signOut,
-  type User
-} from "firebase/auth";
 
 type Screen =
   | "splash"
   | "login"
-  | "authSignIn"
-  | "authSignUp"
   | "setup"
   | "home"
   | "record"
@@ -46,20 +35,14 @@ type Screen =
   | "download"
   | "history"
   | "recycleBin"
-  | "profile"
-  | "admin";
+  | "profile";
 
-type CreatorMode = "guest" | "saved";
-type LoginChoice = "guest" | "signin" | "signup" | null;
+type CreatorMode = "guest";
 type CreatorProfile = {
   name: string;
   email: string;
   bio: string;
   avatarUri?: string;
-};
-type AuthSubmit = {
-  profile: CreatorProfile;
-  password: string;
 };
 type TrackStatus = "Ready" | "Temporary" | "Saved" | "Downloaded" | "Shared" | "Processing" | "Retry";
 type GeneratedTrackView = {
@@ -478,47 +461,6 @@ type BackendRecycleBinResponse = {
   voice_takes: BackendVoiceTake[];
   tracks: BackendJob[];
 };
-type BackendAdminUser = {
-  user_id: string;
-  name: string;
-  email: string;
-  updated_at: string;
-};
-type BackendAdminSummaryResponse = {
-  environment: string;
-  repository_backend: string;
-  storage_backend: string;
-  worker_backend: string;
-  music_generator_backend: string;
-  task_backend: string;
-  bucket: string;
-  users: BackendAdminUser[];
-  recent_jobs: BackendJob[];
-  recent_voice_takes: BackendVoiceTake[];
-  deleted_jobs: BackendJob[];
-  deleted_voice_takes: BackendVoiceTake[];
-  counts: Record<string, number>;
-  cloud_cost?: {
-    period: string;
-    generations: number;
-    generation_limit: number;
-    estimated_cost_usd: number;
-    unit_cost_usd: number;
-    generator_backend: string;
-  };
-  cloud_runtime?: {
-    runtime: string;
-    service: string;
-    revision: string;
-    region: string;
-    project_id?: string | null;
-    service_url?: string | null;
-    worker_url?: string | null;
-    task_queue: string;
-    storage_bucket: string;
-    cors_origins: string[];
-  };
-};
 type SignedUploadResponse = {
   upload_id: string;
   upload_url: string;
@@ -529,7 +471,6 @@ type UploadVerificationResponse = {
   raw_audio_path: string;
   exists: boolean;
 };
-type FirebaseSetupStatus = "loading" | "ready" | "unconfigured" | "unavailable";
 type IconName =
   | "back"
   | "creator"
@@ -648,30 +589,9 @@ function swapHindiEnglishDetection(language: string): string {
 const processingSteps = ["Saving Idea", "Idea Analysis", "Isolating Vocals", "Building Demo", "Packing Exports", "Ready"];
 const USE_BACKEND_API = true;
 const BACKEND_BASE_URL = (process.env.EXPO_PUBLIC_BACKEND_BASE_URL || "http://localhost:8090").replace(/\/$/, "");
-const BACKEND_CONNECTED_MESSAGE = "Backend: FastAPI connected. Firebase Auth, Firestore, and Cloud Storage are active.";
-const BACKEND_OFFLINE_MESSAGE = "Backend is offline. Start FastAPI to use cloud history, storage, and generation.";
+const BACKEND_CONNECTED_MESSAGE = "Backend: local FastAPI, SQLite, filesystem storage, and audio tools are connected.";
+const BACKEND_OFFLINE_MESSAGE = "Backend is offline. Start FastAPI to use local history, storage, and generation.";
 const BACKEND_PLACEHOLDER_TRACK = "Pending backend draft";
-const ADMIN_FIREBASE_UIDS = new Set(["64EbLsRLTmflRHae5oJgrqQFs8f1"]);
-const ADMIN_EMAILS = new Set(["yeshwant_satyada@srmap.edu.in"]);
-const firebaseConfig = {
-  apiKey: process.env.EXPO_PUBLIC_FIREBASE_API_KEY,
-  authDomain: process.env.EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN,
-  projectId: process.env.EXPO_PUBLIC_FIREBASE_PROJECT_ID,
-  appId: process.env.EXPO_PUBLIC_FIREBASE_APP_ID
-};
-const hasFirebaseConfig = Boolean(
-  firebaseConfig.apiKey &&
-  firebaseConfig.authDomain &&
-  firebaseConfig.projectId &&
-  firebaseConfig.appId
-);
-const firebaseApp = hasFirebaseConfig ? (getApps()[0] ?? initializeApp(firebaseConfig)) : null;
-const firebaseAuth = firebaseApp ? getAuth(firebaseApp) : null;
-
-function isAdminFirebaseUser(user: User | null) {
-  const email = user?.email?.trim().toLowerCase() ?? "";
-  return Boolean(user && (ADMIN_FIREBASE_UIDS.has(user.uid) || ADMIN_EMAILS.has(email)));
-}
 
 function buildTrackTitle(trackName: string, genre: Genre, mode: FileNameMode) {
   const cleanName = trackName.trim() || "Untitled Track";
@@ -707,7 +627,7 @@ function demoExportUrlsFromResponse(response: BackendJobResponse): DemoExportUrl
 function getGeneratedTrackStatus(creatorMode: CreatorMode, hasSaved: boolean, hasDownloaded: boolean, hasShared = false): TrackStatus {
   if (hasDownloaded) return "Downloaded";
   if (hasShared) return "Shared";
-  if (creatorMode === "saved" && hasSaved) return "Saved";
+  if (hasSaved) return "Saved";
   return "Temporary";
 }
 
@@ -845,21 +765,8 @@ function summarizeGenerationIntent(intent: GenerationIntent) {
   return `${intent.language} | ${style} | ${duration}`;
 }
 
-function firebaseAuthErrorMessage(error: unknown, kind?: "signin" | "signup") {
-  if (error instanceof FirebaseError) {
-    if (error.code === "auth/email-already-in-use") return "Email already registered. Sign in instead.";
-    if (error.code === "auth/invalid-credential" || error.code === "auth/wrong-password" || error.code === "auth/user-not-found") return "Email or password is incorrect.";
-    if (error.code === "auth/weak-password") return "Password should be at least 6 characters.";
-    if (error.code === "auth/invalid-email") return "Enter a valid email address.";
-  }
-  return kind === "signup" ? "Could not create Firebase account." : "Could not sign in.";
-}
-
-async function getAuthHeader(creatorMode: CreatorMode, firebaseUser: User | null) {
-  if (creatorMode === "guest") return "Bearer guest:guest-session";
-  if (!hasFirebaseConfig || !firebaseAuth) throw new Error("Firebase Auth is not configured.");
-  if (!firebaseUser) throw new Error("Sign in again to continue.");
-  return `Bearer ${await firebaseUser.getIdToken()}`;
+async function getAuthHeader(_creatorMode: CreatorMode) {
+  return "Bearer guest:guest-session";
 }
 
 function mapBackendStageToIndex(stage?: string) {
@@ -928,26 +835,26 @@ function getStoredGenre() {
   }
 }
 
-function getStoredGenreForAccount(accountKey: string) {
+function getStoredGenreForSession(sessionKey: string) {
   try {
-    const storedId = (globalThis as any).localStorage?.getItem(`skarly.${accountKey}.defaultGenre`);
+    const storedId = (globalThis as any).localStorage?.getItem(`skarly.${sessionKey}.defaultGenre`);
     return genres.find((genre) => genre.id === storedId);
   } catch {
     return undefined;
   }
 }
 
-function storeDefaultGenre(genre: Genre, accountKey = "guest") {
+function storeDefaultGenre(genre: Genre, sessionKey = "guest") {
   try {
     (globalThis as any).localStorage?.setItem("skarly.defaultGenre", genre.id);
-    (globalThis as any).localStorage?.setItem(`skarly.${accountKey}.defaultGenre`, genre.id);
+    (globalThis as any).localStorage?.setItem(`skarly.${sessionKey}.defaultGenre`, genre.id);
   } catch {
-    // Native builds can persist this through the cloud profile path instead.
+    // Native builds can add a local persistence adapter later.
   }
 }
 
-function localAccountKey(creatorMode: CreatorMode, firebaseUser: User | null) {
-  return creatorMode === "saved" && firebaseUser?.uid ? `saved.${firebaseUser.uid}` : "guest";
+function localSessionKey(_creatorMode: CreatorMode) {
+  return "guest";
 }
 
 function serializeLocalVoiceTake(take: VoiceTake) {
@@ -955,9 +862,9 @@ function serializeLocalVoiceTake(take: VoiceTake) {
   return safeTake;
 }
 
-function loadLocalVoiceTakes(accountKey: string): VoiceTake[] {
+function loadLocalVoiceTakes(sessionKey: string): VoiceTake[] {
   try {
-    const raw = (globalThis as any).localStorage?.getItem(`skarly.${accountKey}.voiceTakes`);
+    const raw = (globalThis as any).localStorage?.getItem(`skarly.${sessionKey}.voiceTakes`);
     if (!raw) return [];
     const parsed = JSON.parse(raw);
     return Array.isArray(parsed) ? parsed : [];
@@ -966,10 +873,10 @@ function loadLocalVoiceTakes(accountKey: string): VoiceTake[] {
   }
 }
 
-function storeLocalVoiceTakes(accountKey: string, takes: VoiceTake[]) {
+function storeLocalVoiceTakes(sessionKey: string, takes: VoiceTake[]) {
   try {
     const storable = takes.slice(0, 30).map(serializeLocalVoiceTake);
-    (globalThis as any).localStorage?.setItem(`skarly.${accountKey}.voiceTakes`, JSON.stringify(storable));
+    (globalThis as any).localStorage?.setItem(`skarly.${sessionKey}.voiceTakes`, JSON.stringify(storable));
   } catch {
     // Best effort browser cache for interrupted uploads.
   }
@@ -1056,21 +963,21 @@ async function uploadFileToSignedUrl(fileUri: string, uploadUrl: string, content
     body: fileBlob
   });
   if (!uploadResponse.ok) {
-    throw new Error(`Cloud upload failed: ${uploadResponse.status}`);
+    throw new Error(`Local storage upload failed: ${uploadResponse.status}`);
   }
 }
 
-async function uploadFileThroughBackend(fileUri: string, rawAudioPath: string, contentType: string, creatorMode: CreatorMode, firebaseUser: User | null) {
+async function uploadFileThroughBackend(fileUri: string, rawAudioPath: string, contentType: string, creatorMode: CreatorMode) {
   const fileBlob = await readAudioFileBlob(fileUri);
   const query = `raw_audio_path=${encodeURIComponent(rawAudioPath)}&content_type=${encodeURIComponent(contentType)}`;
-  return backendUploadBytes<UploadVerificationResponse>(`/v1/uploads/bytes?${query}`, creatorMode, firebaseUser, fileBlob, contentType);
+  return backendUploadBytes<UploadVerificationResponse>(`/v1/uploads/bytes?${query}`, creatorMode, fileBlob, contentType);
 }
 
-async function uploadFileToCloud(fileUri: string, signed: SignedUploadResponse, contentType: string, creatorMode: CreatorMode, firebaseUser: User | null) {
+async function uploadFileToLocalStorage(fileUri: string, signed: SignedUploadResponse, contentType: string, creatorMode: CreatorMode) {
   try {
     await uploadFileToSignedUrl(fileUri, signed.upload_url, contentType);
   } catch {
-    await uploadFileThroughBackend(fileUri, signed.raw_audio_path, contentType, creatorMode, firebaseUser);
+    await uploadFileThroughBackend(fileUri, signed.raw_audio_path, contentType, creatorMode);
   }
 }
 
@@ -1108,15 +1015,12 @@ function safeStorageSegment(value: string) {
   return (cleaned || "creator").slice(0, 48);
 }
 
-function backendStorageOwnerPath(creatorMode: CreatorMode, firebaseUser: User | null) {
-  if (creatorMode === "guest") return "guest/guest-session";
-  const uid = firebaseUser?.uid ?? "signed-user";
-  const readable = firebaseUser?.email?.split("@")[0] ?? uid;
-  return `saved/${safeStorageSegment(readable)}--${safeStorageSegment(uid).slice(0, 8)}`;
+function backendStorageOwnerPath(_creatorMode: CreatorMode) {
+  return "guest/guest-session";
 }
 
-function pendingRawAudioPath(creatorMode: CreatorMode, firebaseUser: User | null, source: InputSource) {
-  return `users/${backendStorageOwnerPath(creatorMode, firebaseUser)}/raw/pending-${source.kind}/voice.mp3`;
+function pendingRawAudioPath(creatorMode: CreatorMode, source: InputSource) {
+  return `users/${backendStorageOwnerPath(creatorMode)}/raw/pending-${source.kind}/voice.mp3`;
 }
 
 function mapBackendVoiceTake(take: BackendVoiceTake): VoiceTake {
@@ -1124,7 +1028,7 @@ function mapBackendVoiceTake(take: BackendVoiceTake): VoiceTake {
     id: take.take_id,
     title: take.title,
     duration: take.duration,
-    createdAt: "Cloud saved",
+    createdAt: "Saved locally",
     contentType: take.content_type,
     sizeBytes: take.size_bytes ?? undefined,
     rawAudioPath: take.raw_audio_path,
@@ -1148,8 +1052,8 @@ function mergeVoiceTakesWithBackend(current: VoiceTake[], backendTakes: BackendV
   return [...mergedBackend, ...localOnly];
 }
 
-async function backendRequest<T>(path: string, creatorMode: CreatorMode, firebaseUser: User | null, options: RequestInit = {}) {
-  const authorization = await getAuthHeader(creatorMode, firebaseUser);
+async function backendRequest<T>(path: string, creatorMode: CreatorMode, options: RequestInit = {}) {
+  const authorization = await getAuthHeader(creatorMode);
   const response = await fetch(`${BACKEND_BASE_URL}${path}`, {
     ...options,
     headers: {
@@ -1173,8 +1077,8 @@ async function backendRequest<T>(path: string, creatorMode: CreatorMode, firebas
   return response.json() as Promise<T>;
 }
 
-async function backendUploadBytes<T>(path: string, creatorMode: CreatorMode, firebaseUser: User | null, body: Blob, contentType: string) {
-  const authorization = await getAuthHeader(creatorMode, firebaseUser);
+async function backendUploadBytes<T>(path: string, creatorMode: CreatorMode, body: Blob, contentType: string) {
+  const authorization = await getAuthHeader(creatorMode);
   const response = await fetch(`${BACKEND_BASE_URL}${path}`, {
     method: "POST",
     headers: {
@@ -1207,8 +1111,8 @@ function backendStatus(error: unknown) {
 }
 
 const backendApi = {
-  getProfile: (creatorMode: CreatorMode, firebaseUser: User | null) => backendRequest<BackendProfileResponse>("/v1/me", creatorMode, firebaseUser),
-  saveProfile: (creatorMode: CreatorMode, firebaseUser: User | null, profile: CreatorProfile) => backendRequest<BackendProfileResponse>("/v1/me", creatorMode, firebaseUser, {
+  getProfile: (creatorMode: CreatorMode) => backendRequest<BackendProfileResponse>("/v1/me", creatorMode),
+  saveProfile: (creatorMode: CreatorMode, profile: CreatorProfile) => backendRequest<BackendProfileResponse>("/v1/me", creatorMode, {
     method: "PUT",
     body: JSON.stringify({
       name: profile.name,
@@ -1217,7 +1121,7 @@ const backendApi = {
       photo_url: profile.avatarUri ?? null
     })
   }),
-  signUpload: (creatorMode: CreatorMode, firebaseUser: User | null, source: InputSource) => backendRequest<SignedUploadResponse>("/v1/uploads/sign", creatorMode, firebaseUser, {
+  signUpload: (creatorMode: CreatorMode, source: InputSource) => backendRequest<SignedUploadResponse>("/v1/uploads/sign", creatorMode, {
     method: "POST",
     body: JSON.stringify({
       filename: source.label,
@@ -1226,17 +1130,17 @@ const backendApi = {
       source_type: source.kind
     })
   }),
-  verifyUpload: (creatorMode: CreatorMode, firebaseUser: User | null, rawAudioPath: string) => backendRequest<UploadVerificationResponse>("/v1/uploads/verify", creatorMode, firebaseUser, {
+  verifyUpload: (creatorMode: CreatorMode, rawAudioPath: string) => backendRequest<UploadVerificationResponse>("/v1/uploads/verify", creatorMode, {
     method: "POST",
     body: JSON.stringify({ raw_audio_path: rawAudioPath })
   }),
-  getSkarlyProducerProfiles: (creatorMode: CreatorMode, firebaseUser: User | null) => backendRequest<SkarlyProducerProfile[]>("/api/v2/producer-profiles", creatorMode, firebaseUser),
-  createSkarlyV2Analysis: (creatorMode: CreatorMode, firebaseUser: User | null, source: InputSource) => backendRequest<SkarlyV2Job>("/api/v2/analyse", creatorMode, firebaseUser, {
+  getSkarlyProducerProfiles: (creatorMode: CreatorMode) => backendRequest<SkarlyProducerProfile[]>("/api/v2/producer-profiles", creatorMode),
+  createSkarlyV2Analysis: (creatorMode: CreatorMode, source: InputSource) => backendRequest<SkarlyV2Job>("/api/v2/analyse", creatorMode, {
     method: "POST",
     body: JSON.stringify(skarlyUploadPayload(source))
   }),
-  getSkarlyV2Job: (creatorMode: CreatorMode, firebaseUser: User | null, jobId: string) => backendRequest<SkarlyV2Job>(`/api/v2/jobs/${jobId}`, creatorMode, firebaseUser),
-  createSkarlyV2Generation: (creatorMode: CreatorMode, firebaseUser: User | null, analysisId: string, durationSeconds: number, profiles: string[], intent: GenerationIntent, source: InputSource, detected?: SkarlyDetected | null) => backendRequest<SkarlyV2Job>("/api/v2/generations", creatorMode, firebaseUser, {
+  getSkarlyV2Job: (creatorMode: CreatorMode, jobId: string) => backendRequest<SkarlyV2Job>(`/api/v2/jobs/${jobId}`, creatorMode),
+  createSkarlyV2Generation: (creatorMode: CreatorMode, analysisId: string, durationSeconds: number, profiles: string[], intent: GenerationIntent, source: InputSource, detected?: SkarlyDetected | null) => backendRequest<SkarlyV2Job>("/api/v2/generations", creatorMode, {
     method: "POST",
     body: JSON.stringify({
       analysis_id: analysisId,
@@ -1255,7 +1159,7 @@ const backendApi = {
       reference_strength: source.referenceStrength ?? 0.35
     })
   }),
-  regenerateSkarlyV2: (creatorMode: CreatorMode, firebaseUser: User | null, generationId: string, versionIndex: number, energyDelta = 0, instrumentChange?: string) => backendRequest<SkarlyV2Job>("/api/v2/generations/regenerate", creatorMode, firebaseUser, {
+  regenerateSkarlyV2: (creatorMode: CreatorMode, generationId: string, versionIndex: number, energyDelta = 0, instrumentChange?: string) => backendRequest<SkarlyV2Job>("/api/v2/generations/regenerate", creatorMode, {
     method: "POST",
     body: JSON.stringify({
       generation_id: generationId,
@@ -1264,7 +1168,7 @@ const backendApi = {
       instrument_change: instrumentChange?.trim() || undefined
     })
   }),
-  regenerateSkarlyV2Section: (creatorMode: CreatorMode, firebaseUser: User | null, generationId: string, versionIndex: number, sectionStartSeconds: number, sectionEndSeconds: number, editInstruction: string) => backendRequest<SkarlyV2Job>("/api/v2/generations/regenerate-section", creatorMode, firebaseUser, {
+  regenerateSkarlyV2Section: (creatorMode: CreatorMode, generationId: string, versionIndex: number, sectionStartSeconds: number, sectionEndSeconds: number, editInstruction: string) => backendRequest<SkarlyV2Job>("/api/v2/generations/regenerate-section", creatorMode, {
     method: "POST",
     body: JSON.stringify({
       generation_id: generationId,
@@ -1278,7 +1182,7 @@ const backendApi = {
       boundary_crossfade_seconds: 0.025
     })
   }),
-  remixSkarlyV2: (creatorMode: CreatorMode, firebaseUser: User | null, generationId: string, versionIndex: number, mixPreset: MixPreset, balance: number) => backendRequest<SkarlyV2Job>("/api/v2/mixes", creatorMode, firebaseUser, {
+  remixSkarlyV2: (creatorMode: CreatorMode, generationId: string, versionIndex: number, mixPreset: MixPreset, balance: number) => backendRequest<SkarlyV2Job>("/api/v2/mixes", creatorMode, {
     method: "POST",
     body: JSON.stringify({
       generation_id: generationId,
@@ -1287,7 +1191,7 @@ const backendApi = {
       vocal_music_balance: balance
     })
   }),
-  exportSkarlyV2: (creatorMode: CreatorMode, firebaseUser: User | null, generationId: string, versionIndex: number) => backendRequest<SkarlyV2ExportResponse>("/api/v2/exports", creatorMode, firebaseUser, {
+  exportSkarlyV2: (creatorMode: CreatorMode, generationId: string, versionIndex: number) => backendRequest<SkarlyV2ExportResponse>("/api/v2/exports", creatorMode, {
     method: "POST",
     body: JSON.stringify({
       generation_id: generationId,
@@ -1295,17 +1199,17 @@ const backendApi = {
       include_optional_stems: true
     })
   }),
-  saveSkarlyV2Feedback: (creatorMode: CreatorMode, firebaseUser: User | null, payload: Record<string, unknown>) => backendRequest<SkarlyV2Job>("/api/v2/feedback", creatorMode, firebaseUser, {
+  saveSkarlyV2Feedback: (creatorMode: CreatorMode, payload: Record<string, unknown>) => backendRequest<SkarlyV2Job>("/api/v2/feedback", creatorMode, {
     method: "POST",
     body: JSON.stringify(payload)
   }),
-  analyzeSkarly: (creatorMode: CreatorMode, firebaseUser: User | null, source: InputSource, _intent: GenerationIntent) => backendRequest<SkarlyAnalyzeResponse>("/v1/skarly/analyze", creatorMode, firebaseUser, {
+  analyzeSkarly: (creatorMode: CreatorMode, source: InputSource, _intent: GenerationIntent) => backendRequest<SkarlyAnalyzeResponse>("/v1/skarly/analyze", creatorMode, {
     method: "POST",
     body: JSON.stringify({
       ...skarlyUploadPayload(source)
     })
   }),
-  generateSkarly: (creatorMode: CreatorMode, firebaseUser: User | null, source: InputSource, intent: GenerationIntent, detected?: SkarlyDetected | null) => backendRequest<SkarlyGenerateResponse>("/v1/skarly/generate", creatorMode, firebaseUser, {
+  generateSkarly: (creatorMode: CreatorMode, source: InputSource, intent: GenerationIntent, detected?: SkarlyDetected | null) => backendRequest<SkarlyGenerateResponse>("/v1/skarly/generate", creatorMode, {
     method: "POST",
     body: JSON.stringify({
       ...skarlyUploadPayload(source),
@@ -1319,11 +1223,11 @@ const backendApi = {
       reference_strength: source.referenceStrength ?? 0.35
     })
   }),
-  selectSkarlyVersion: (creatorMode: CreatorMode, firebaseUser: User | null, jobId: string, versionIndex: number) => backendRequest<BackendJobResponse>(`/v1/skarly/jobs/${jobId}/select`, creatorMode, firebaseUser, {
+  selectSkarlyVersion: (creatorMode: CreatorMode, jobId: string, versionIndex: number) => backendRequest<BackendJobResponse>(`/v1/skarly/jobs/${jobId}/select`, creatorMode, {
     method: "POST",
     body: JSON.stringify({ version_index: versionIndex })
   }),
-  createJob: (creatorMode: CreatorMode, firebaseUser: User | null, source: InputSource, genre: Genre, intent: GenerationIntent) => backendRequest<BackendJobResponse>("/v1/jobs", creatorMode, firebaseUser, {
+  createJob: (creatorMode: CreatorMode, source: InputSource, genre: Genre, intent: GenerationIntent) => backendRequest<BackendJobResponse>("/v1/jobs", creatorMode, {
     method: "POST",
     body: JSON.stringify({
       raw_audio_path: source.rawAudioPath,
@@ -1335,19 +1239,19 @@ const backendApi = {
       delete_raw_after_mix: false
     })
   }),
-  getJob: (creatorMode: CreatorMode, firebaseUser: User | null, jobId: string) => backendRequest<BackendJobResponse>(`/v1/jobs/${jobId}`, creatorMode, firebaseUser),
-  updateJobLibrary: (creatorMode: CreatorMode, firebaseUser: User | null, jobId: string, trackName?: string, libraryStatus?: TrackStatus) => backendRequest<BackendJobResponse>(`/v1/jobs/${jobId}/library`, creatorMode, firebaseUser, {
+  getJob: (creatorMode: CreatorMode, jobId: string) => backendRequest<BackendJobResponse>(`/v1/jobs/${jobId}`, creatorMode),
+  updateJobLibrary: (creatorMode: CreatorMode, jobId: string, trackName?: string, libraryStatus?: TrackStatus) => backendRequest<BackendJobResponse>(`/v1/jobs/${jobId}/library`, creatorMode, {
     method: "PATCH",
     body: JSON.stringify({
       track_name: trackName,
       library_status: libraryStatus
     })
   }),
-  getVoiceTakes: (creatorMode: CreatorMode, firebaseUser: User | null) => backendRequest<BackendVoiceTakeListResponse>("/v1/voice-takes", creatorMode, firebaseUser),
-  getRecycleBin: (creatorMode: CreatorMode, firebaseUser: User | null) => backendRequest<BackendRecycleBinResponse>("/v1/recycle-bin", creatorMode, firebaseUser),
-  recoverLibrary: (creatorMode: CreatorMode, firebaseUser: User | null) => backendRequest<BackendLibraryRecoveryResponse>("/v1/library/recover", creatorMode, firebaseUser, { method: "POST" }),
-  getVoiceTakePlayback: (creatorMode: CreatorMode, firebaseUser: User | null, takeId: string) => backendRequest<BackendVoiceTakePlaybackResponse>(`/v1/voice-takes/${takeId}/play`, creatorMode, firebaseUser),
-  saveVoiceTake: (creatorMode: CreatorMode, firebaseUser: User | null, take: VoiceTake) => backendRequest<BackendVoiceTakeResponse>("/v1/voice-takes", creatorMode, firebaseUser, {
+  getVoiceTakes: (creatorMode: CreatorMode) => backendRequest<BackendVoiceTakeListResponse>("/v1/voice-takes", creatorMode),
+  getRecycleBin: (creatorMode: CreatorMode) => backendRequest<BackendRecycleBinResponse>("/v1/recycle-bin", creatorMode),
+  recoverLibrary: (creatorMode: CreatorMode) => backendRequest<BackendLibraryRecoveryResponse>("/v1/library/recover", creatorMode, { method: "POST" }),
+  getVoiceTakePlayback: (creatorMode: CreatorMode, takeId: string) => backendRequest<BackendVoiceTakePlaybackResponse>(`/v1/voice-takes/${takeId}/play`, creatorMode),
+  saveVoiceTake: (creatorMode: CreatorMode, take: VoiceTake) => backendRequest<BackendVoiceTakeResponse>("/v1/voice-takes", creatorMode, {
     method: "POST",
     body: JSON.stringify({
       title: take.title,
@@ -1357,22 +1261,19 @@ const backendApi = {
       size_bytes: take.sizeBytes ?? null
     })
   }),
-  deleteVoiceTake: (creatorMode: CreatorMode, firebaseUser: User | null, takeId: string) => backendRequest<BackendVoiceTakeResponse>(`/v1/voice-takes/${takeId}`, creatorMode, firebaseUser, { method: "DELETE" }),
-  restoreVoiceTake: (creatorMode: CreatorMode, firebaseUser: User | null, takeId: string) => backendRequest<BackendVoiceTakeResponse>(`/v1/voice-takes/${takeId}/restore`, creatorMode, firebaseUser, { method: "POST" }),
-  permanentlyDeleteVoiceTake: (creatorMode: CreatorMode, firebaseUser: User | null, takeId: string) => backendRequest<BackendVoiceTakeResponse>(`/v1/voice-takes/${takeId}/permanent`, creatorMode, firebaseUser, { method: "DELETE" }),
-  getAdminSummary: (creatorMode: CreatorMode, firebaseUser: User | null) => backendRequest<BackendAdminSummaryResponse>("/v1/admin/summary", creatorMode, firebaseUser),
-  cleanupStaleLibrary: (creatorMode: CreatorMode, firebaseUser: User | null) => backendRequest<BackendHistoryResponse>("/v1/library/cleanup-stale", creatorMode, firebaseUser, { method: "POST" }),
-  getHistory: (creatorMode: CreatorMode, firebaseUser: User | null) => backendRequest<BackendHistoryResponse>("/v1/history", creatorMode, firebaseUser),
-  retryJob: (creatorMode: CreatorMode, firebaseUser: User | null, jobId: string) => backendRequest<BackendJobResponse>(`/v1/jobs/${jobId}/retry`, creatorMode, firebaseUser, { method: "POST" }),
-  deleteTrack: (creatorMode: CreatorMode, firebaseUser: User | null, jobId: string) => backendRequest<BackendJobResponse>(`/v1/tracks/${jobId}`, creatorMode, firebaseUser, { method: "DELETE" }),
-  restoreTrack: (creatorMode: CreatorMode, firebaseUser: User | null, jobId: string) => backendRequest<BackendJobResponse>(`/v1/tracks/${jobId}/restore`, creatorMode, firebaseUser, { method: "POST" }),
-  permanentlyDeleteTrack: (creatorMode: CreatorMode, firebaseUser: User | null, jobId: string) => backendRequest<BackendJobResponse>(`/v1/tracks/${jobId}/permanent`, creatorMode, firebaseUser, { method: "DELETE" }),
-  deleteRaw: (creatorMode: CreatorMode, firebaseUser: User | null, jobId: string) => backendRequest<BackendJobResponse>(`/v1/privacy/delete-raw/${jobId}`, creatorMode, firebaseUser, { method: "POST" })
+  deleteVoiceTake: (creatorMode: CreatorMode, takeId: string) => backendRequest<BackendVoiceTakeResponse>(`/v1/voice-takes/${takeId}`, creatorMode, { method: "DELETE" }),
+  restoreVoiceTake: (creatorMode: CreatorMode, takeId: string) => backendRequest<BackendVoiceTakeResponse>(`/v1/voice-takes/${takeId}/restore`, creatorMode, { method: "POST" }),
+  permanentlyDeleteVoiceTake: (creatorMode: CreatorMode, takeId: string) => backendRequest<BackendVoiceTakeResponse>(`/v1/voice-takes/${takeId}/permanent`, creatorMode, { method: "DELETE" }),
+  getHistory: (creatorMode: CreatorMode) => backendRequest<BackendHistoryResponse>("/v1/history", creatorMode),
+  retryJob: (creatorMode: CreatorMode, jobId: string) => backendRequest<BackendJobResponse>(`/v1/jobs/${jobId}/retry`, creatorMode, { method: "POST" }),
+  deleteTrack: (creatorMode: CreatorMode, jobId: string) => backendRequest<BackendJobResponse>(`/v1/tracks/${jobId}`, creatorMode, { method: "DELETE" }),
+  restoreTrack: (creatorMode: CreatorMode, jobId: string) => backendRequest<BackendJobResponse>(`/v1/tracks/${jobId}/restore`, creatorMode, { method: "POST" }),
+  permanentlyDeleteTrack: (creatorMode: CreatorMode, jobId: string) => backendRequest<BackendJobResponse>(`/v1/tracks/${jobId}/permanent`, creatorMode, { method: "DELETE" }),
+  deleteRaw: (creatorMode: CreatorMode, jobId: string) => backendRequest<BackendJobResponse>(`/v1/privacy/delete-raw/${jobId}`, creatorMode, { method: "POST" })
 };
 
 async function pollSkarlyV2Job(
   creatorMode: CreatorMode,
-  firebaseUser: User | null,
   jobId: string,
   onProgress: (job: SkarlyV2Job) => void,
   timeoutMs = 2 * 60 * 60 * 1000,
@@ -1382,7 +1283,7 @@ async function pollSkarlyV2Job(
   let lastActivityAt = Date.now();
   let lastFingerprint = "";
   while (Date.now() < deadline) {
-    const job = await backendApi.getSkarlyV2Job(creatorMode, firebaseUser, jobId);
+    const job = await backendApi.getSkarlyV2Job(creatorMode, jobId);
     const fingerprint = [
       job.status,
       job.stage,
@@ -1410,18 +1311,13 @@ async function pollSkarlyV2Job(
 
 function App() {
   const [screen, setScreen] = useState<Screen>("splash");
-  const [creatorMode, setCreatorMode] = useState<CreatorMode>("guest");
-  const [loginChoice, setLoginChoice] = useState<LoginChoice>(null);
+  const creatorMode: CreatorMode = "guest";
   const [creatorProfile, setCreatorProfile] = useState<CreatorProfile>({
     name: "Guest Creator",
     email: "",
     bio: "Private Skarly workspace"
   });
-  const [firebaseUser, setFirebaseUser] = useState<User | null>(null);
-  const [firebaseStatus, setFirebaseStatus] = useState<FirebaseSetupStatus>(hasFirebaseConfig ? "loading" : "unconfigured");
   const [startupLoading, setStartupLoading] = useState(true);
-  const [authBusy, setAuthBusy] = useState(false);
-  const [accountRestoring, setAccountRestoring] = useState(false);
   const [intent, setIntent] = useState("Demo Song");
   const [selectedGenre, setSelectedGenreState] = useState(getStoredGenre);
   const [generationIntent, setGenerationIntent] = useState<GenerationIntent>(defaultGenerationIntent);
@@ -1463,8 +1359,6 @@ function App() {
   const [selectedSkarlyVersionIndex, setSelectedSkarlyVersionIndex] = useState(0);
   const [skarlyBusy, setSkarlyBusy] = useState(false);
   const [backendTracks, setBackendTracks] = useState<BackendJob[]>([]);
-  const [adminSummary, setAdminSummary] = useState<BackendAdminSummaryResponse | null>(null);
-  const [adminLoading, setAdminLoading] = useState(false);
   const [recycleVoiceTakes, setRecycleVoiceTakes] = useState<VoiceTake[]>([]);
   const [recycleTracks, setRecycleTracks] = useState<BackendJob[]>([]);
   const [deletedGeneratedTracks, setDeletedGeneratedTracks] = useState<GeneratedTrackView[]>([]);
@@ -1486,7 +1380,7 @@ function App() {
   const webAudioRef = useRef<any | null>(null);
   const webAudioObjectUrlRef = useRef<string | null>(null);
   const activePlaybackUrlRef = useRef<string | null>(null);
-  const accountKey = useMemo(() => localAccountKey(creatorMode, firebaseUser), [creatorMode, firebaseUser]);
+  const sessionKey = useMemo(() => localSessionKey(creatorMode), [creatorMode]);
 
   const showToast = useCallback((message: string) => {
     setToastMessage(message);
@@ -1494,8 +1388,8 @@ function App() {
 
   const setSelectedGenre = useCallback((genre: Genre) => {
     setSelectedGenreState(genre);
-    storeDefaultGenre(genre, accountKey);
-  }, [accountKey]);
+    storeDefaultGenre(genre, sessionKey);
+  }, [sessionKey]);
 
   const applyBackendDemoResponse = useCallback((response: BackendJobResponse) => {
     setBackendFinalUrl(response.final_mp3_url ?? null);
@@ -1575,14 +1469,14 @@ function App() {
   }, [applySelectedSkarlyVersion]);
 
   useEffect(() => {
-    const storedGenre = getStoredGenreForAccount(accountKey);
+    const storedGenre = getStoredGenreForSession(sessionKey);
     if (storedGenre) setSelectedGenreState(storedGenre);
-    setVoiceTakes((current) => mergeLocalVoiceTakes(loadLocalVoiceTakes(accountKey), current));
-  }, [accountKey]);
+    setVoiceTakes((current) => mergeLocalVoiceTakes(loadLocalVoiceTakes(sessionKey), current));
+  }, [sessionKey]);
 
   useEffect(() => {
-    storeLocalVoiceTakes(accountKey, voiceTakes);
-  }, [accountKey, voiceTakes]);
+    storeLocalVoiceTakes(sessionKey, voiceTakes);
+  }, [sessionKey, voiceTakes]);
 
   useEffect(() => {
     return () => {
@@ -1598,8 +1492,6 @@ function App() {
 
   const resetAppSession = useCallback(() => {
     setScreen("splash");
-    setCreatorMode("guest");
-    setLoginChoice(null);
     setCreatorProfile({ name: "Guest Creator", email: "", bio: "Private Skarly workspace" });
     setIntent("Demo Song");
     setSelectedGenre(genres[0]);
@@ -1630,8 +1522,6 @@ function App() {
     setSelectedSkarlyVersionIndex(0);
     setSkarlyBusy(false);
     setBackendTracks([]);
-    setAdminSummary(null);
-    setAdminLoading(false);
     setRecycleVoiceTakes([]);
     setRecycleTracks([]);
     setDeletedGeneratedTracks([]);
@@ -1644,209 +1534,14 @@ function App() {
     showToast("Session reset");
   }, [showToast]);
 
-  const normalizeEmail = (email: string) => email.trim().toLowerCase();
-
   useEffect(() => {
     const timer = setTimeout(() => setStartupLoading(false), 1800);
     return () => clearTimeout(timer);
   }, []);
-
-  useEffect(() => {
-    if (!firebaseAuth) {
-      setFirebaseStatus("unconfigured");
-      return undefined;
-    }
-
-    let resolved = false;
-    const timeout = setTimeout(() => {
-      if (!resolved) {
-        setFirebaseStatus("unavailable");
-        showToast("Saved session check timed out. Sign in manually.");
-      }
-    }, 6000);
-
-    const unsubscribe = onAuthStateChanged(firebaseAuth, (user) => {
-      resolved = true;
-      clearTimeout(timeout);
-      setAccountRestoring(!!user);
-      setFirebaseUser(user);
-      setFirebaseStatus("ready");
-      if (!user) {
-        setAccountRestoring(false);
-        return;
-      }
-      const email = user.email ?? "";
-      setCreatorMode("saved");
-      setLoginChoice("signin");
-      setCreatorProfile((current) => ({
-        ...current,
-        name: current.name === "Guest Creator" ? (user.displayName || email.split("@")[0] || "Saved Creator") : current.name,
-        email,
-        bio: current.bio || "Private Skarly workspace"
-      }));
-    });
-    return () => {
-      resolved = true;
-      clearTimeout(timeout);
-      unsubscribe();
-    };
-  }, [showToast]);
-
-  useEffect(() => {
-    if (!firebaseUser || startupLoading || accountRestoring) return;
-    setScreen((current) => ["splash", "login", "authSignIn", "authSignUp", "setup"].includes(current) ? "home" : current);
-  }, [accountRestoring, firebaseUser, startupLoading]);
-
-  useEffect(() => {
-    if (!firebaseUser || creatorMode !== "saved") {
-      setAccountRestoring(false);
-      return;
-    }
-    if (!USE_BACKEND_API) {
-      setAccountRestoring(false);
-      return;
-    }
-    let cancelled = false;
-    setAccountRestoring(true);
-    const restoreSavedWorkspace = async () => {
-      try {
-        try {
-          const response = await backendApi.getProfile("saved", firebaseUser);
-          if (cancelled) return;
-          const savedGenre = genreFromProfileBio(response.profile.bio);
-          if (savedGenre) setSelectedGenre(savedGenre);
-          setCreatorProfile({
-            name: response.profile.name,
-            email: response.profile.email,
-            bio: cleanProfileBio(response.profile.bio),
-            avatarUri: response.profile.photo_url ?? undefined
-          });
-        } catch {
-          if (cancelled) return;
-          setCreatorProfile((current) => ({
-            ...current,
-            email: firebaseUser.email ?? current.email,
-            name: current.name === "Guest Creator" ? (firebaseUser.displayName || firebaseUser.email?.split("@")[0] || "Saved Creator") : current.name
-          }));
-        }
-
-        const [history, takes] = await Promise.all([
-          backendApi.getHistory("saved", firebaseUser),
-          backendApi.getVoiceTakes("saved", firebaseUser)
-        ]);
-        if (cancelled) return;
-        setBackendTracks(visibleBackendJobs(history.tracks));
-        setVoiceTakes((current) => mergeVoiceTakesWithBackend(current, takes.takes));
-        setBackendMode("api");
-        setBackendMessage(BACKEND_CONNECTED_MESSAGE);
-      } catch {
-        if (cancelled) return;
-        setBackendMode("offline");
-        setBackendMessage(BACKEND_OFFLINE_MESSAGE);
-      } finally {
-        if (!cancelled) setAccountRestoring(false);
-      }
-    };
-    void restoreSavedWorkspace();
-    return () => {
-      cancelled = true;
-      setAccountRestoring(false);
-    };
-  }, [creatorMode, firebaseUser, setSelectedGenre]);
-
-  const finishAuth = useCallback(async (submission: AuthSubmit, kind: "signin" | "signup") => {
-    const email = normalizeEmail(submission.profile.email);
-    if (!email) {
-      showToast("Enter an email to continue");
-      return;
-    }
-
-    if (!firebaseAuth || firebaseStatus === "unconfigured") {
-      showToast("Add Firebase config to enable saved accounts");
-      return;
-    }
-
-    setAuthBusy(true);
-    setAccountRestoring(true);
-    try {
-      const credential = kind === "signup"
-        ? await createUserWithEmailAndPassword(firebaseAuth, email, submission.password)
-        : await signInWithEmailAndPassword(firebaseAuth, email, submission.password);
-      setFirebaseUser(credential.user);
-      setCreatorMode("saved");
-      setCreatorProfile({
-        ...submission.profile,
-        name: submission.profile.name.trim() || email.split("@")[0] || "Saved Creator",
-        email
-      });
-      await backendApi.saveProfile("saved", credential.user, {
-        ...submission.profile,
-        name: submission.profile.name.trim() || email.split("@")[0] || "Saved Creator",
-        email,
-        bio: profileBioWithDefaultGenre(submission.profile.bio, selectedGenre)
-      });
-      const [history, takes] = await Promise.all([
-        backendApi.getHistory("saved", credential.user).catch(() => ({ tracks: [] })),
-        backendApi.getVoiceTakes("saved", credential.user).catch(() => ({ takes: [] }))
-      ]);
-      setBackendTracks(visibleBackendJobs(history.tracks));
-      setVoiceTakes((current) => mergeVoiceTakesWithBackend(current, takes.takes));
-      setBackendMode("api");
-      setBackendMessage(BACKEND_CONNECTED_MESSAGE);
-      setScreen("home");
-      showToast(kind === "signup" ? "Firebase workspace created" : "Signed in");
-    } catch (error) {
-      if (error instanceof Error && String(error.message).includes("Network request failed")) {
-        setBackendMode("offline");
-        setBackendMessage(BACKEND_OFFLINE_MESSAGE);
-      }
-      showToast(firebaseAuthErrorMessage(error, kind));
-    } finally {
-      setAccountRestoring(false);
-      setAuthBusy(false);
-    }
-  }, [firebaseStatus, selectedGenre, showToast]);
-
-  const logout = useCallback(async () => {
-    setAuthBusy(true);
-    let firebaseLogoutFailed = false;
-    if (firebaseAuth && (firebaseUser || firebaseAuth.currentUser)) {
-      try {
-        await signOut(firebaseAuth);
-      } catch {
-        firebaseLogoutFailed = true;
-      }
-    }
-    setFirebaseUser(null);
-    setCreatorMode("guest");
-    setLoginChoice(null);
-    setCreatorProfile({ name: "Guest Creator", email: "", bio: "Private Skarly workspace" });
-    setBackendTracks([]);
-    setAdminSummary(null);
-    setAdminLoading(false);
-    setRecycleVoiceTakes([]);
-    setRecycleTracks([]);
-    setDeletedGeneratedTracks([]);
-    setDeletedBackendTrackIds([]);
-    setVoiceTakes([]);
-    setGeneratedTracks([]);
-    setCurrentGeneratedTrackId(null);
-    setBackendJobId(null);
-    setBackendFinalUrl(null);
-    setBackendDownloadUrl(null);
-    setBackendIsolatedVocalUrl(null);
-    setBackendBackingUrl(null);
-    setBackendMode("offline");
-    setBackendMessage("Signed out. Choose Guest, Sign Up, or Sign In.");
-    setAuthBusy(false);
-    setScreen("login");
-    showToast(firebaseLogoutFailed ? "Local session cleared. Sign in again if Firebase still shows this account." : "Logged out");
-  }, [firebaseUser, showToast]);
-
   const refreshBackendHistory = useCallback(async () => {
     if (!USE_BACKEND_API) return;
     try {
-      const history = await backendApi.getHistory(creatorMode, firebaseUser);
+      const history = await backendApi.getHistory(creatorMode);
       setBackendTracks(visibleBackendJobs(history.tracks));
       setBackendMode("api");
       setBackendMessage(BACKEND_CONNECTED_MESSAGE);
@@ -1854,12 +1549,12 @@ function App() {
       setBackendMode("offline");
       setBackendMessage(BACKEND_OFFLINE_MESSAGE);
     }
-  }, [creatorMode, firebaseUser]);
+  }, [creatorMode]);
 
   const refreshBackendVoiceTakes = useCallback(async () => {
-    if (!USE_BACKEND_API || creatorMode !== "saved") return;
+    if (!USE_BACKEND_API) return;
     try {
-      const response = await backendApi.getVoiceTakes(creatorMode, firebaseUser);
+      const response = await backendApi.getVoiceTakes(creatorMode);
       setVoiceTakes((current) => mergeVoiceTakesWithBackend(current, response.takes));
       setBackendMode("api");
       setBackendMessage(BACKEND_CONNECTED_MESSAGE);
@@ -1867,12 +1562,12 @@ function App() {
       setBackendMode("offline");
       setBackendMessage(BACKEND_OFFLINE_MESSAGE);
     }
-  }, [creatorMode, firebaseUser]);
+  }, [creatorMode]);
 
   const refreshRecycleBin = useCallback(async () => {
-    if (!USE_BACKEND_API || creatorMode !== "saved") return;
+    if (!USE_BACKEND_API) return;
     try {
-      const response = await backendApi.getRecycleBin(creatorMode, firebaseUser);
+      const response = await backendApi.getRecycleBin(creatorMode);
       setRecycleVoiceTakes(response.voice_takes.map(mapBackendVoiceTake));
       setRecycleTracks(response.tracks);
       setBackendMode("api");
@@ -1881,127 +1576,47 @@ function App() {
       setBackendMode("offline");
       setBackendMessage(BACKEND_OFFLINE_MESSAGE);
     }
-  }, [creatorMode, firebaseUser]);
+  }, [creatorMode]);
 
-  const refreshAdminSummary = useCallback(async () => {
-    if (!USE_BACKEND_API || creatorMode !== "saved") {
-      showToast("Admin panel needs a saved creator session");
-      return;
-    }
-    setAdminLoading(true);
+  const recoverLocalLibrary = useCallback(async (showFeedback = true) => {
+    if (!USE_BACKEND_API) return;
     try {
-      const response = await backendApi.getAdminSummary(creatorMode, firebaseUser);
-      setAdminSummary(response);
-      setBackendMode("api");
-      setBackendMessage(BACKEND_CONNECTED_MESSAGE);
-    } catch (error) {
-      const status = backendStatus(error);
-      setBackendMode(status ? "api" : "offline");
-      const message = status === 403
-        ? "Admin access denied. Sign in with the configured admin account."
-        : status === 401
-          ? "Admin session missing. Sign out, sign in again, then refresh admin data."
-        : status === 404
-          ? "Backend is running old code. Restart the FastAPI server."
-          : BACKEND_OFFLINE_MESSAGE;
-      setBackendMessage(message);
-      showToast(status === 403 ? "Use admin account" : status === 401 ? "Sign in again" : status === 404 ? "Restart backend to load admin route" : "Could not load admin panel");
-    } finally {
-      setAdminLoading(false);
-    }
-  }, [creatorMode, firebaseUser, showToast]);
-
-  const cleanupStaleLibrary = useCallback(async () => {
-    if (!USE_BACKEND_API || creatorMode !== "saved") {
-      showToast("Cleanup needs a saved admin session");
-      return;
-    }
-    setAdminLoading(true);
-    try {
-      const response = await backendApi.cleanupStaleLibrary(creatorMode, firebaseUser);
-      setBackendTracks((current) => visibleBackendJobs(current).filter((job) => !response.tracks.some((deleted) => deleted.job_id === job.job_id)));
-      await Promise.all([refreshAdminSummary(), refreshBackendHistory(), refreshRecycleBin()]);
-      showToast(`Moved ${response.tracks.length} stale item${response.tracks.length === 1 ? "" : "s"} to Recycle Bin`);
-    } catch (error) {
-      showToast(`Cleanup failed: ${errorMessage(error)}`);
-    } finally {
-      setAdminLoading(false);
-    }
-  }, [creatorMode, firebaseUser, refreshAdminSummary, refreshBackendHistory, refreshRecycleBin, showToast]);
-
-  const recoverCloudLibrary = useCallback(async (showFeedback = true) => {
-    if (!USE_BACKEND_API || creatorMode !== "saved") {
-      if (showFeedback) showToast("Cloud recovery is for saved creators");
-      return;
-    }
-    try {
-      const response = await backendApi.recoverLibrary(creatorMode, firebaseUser);
+      const response = await backendApi.recoverLibrary(creatorMode);
       const recoveredCount = response.recovered_voice_takes + response.recovered_tracks;
       setVoiceTakes((current) => mergeVoiceTakesWithBackend(current, response.takes));
       setBackendTracks(visibleBackendJobs(response.tracks));
       setBackendMode("api");
       setBackendMessage(BACKEND_CONNECTED_MESSAGE);
       if (showFeedback || recoveredCount > 0) {
-        showToast(`Recovered ${recoveredCount} cloud item${recoveredCount === 1 ? "" : "s"}`);
+        showToast(`Recovered ${recoveredCount} local item${recoveredCount === 1 ? "" : "s"}`);
       }
     } catch {
       setBackendMode("offline");
       setBackendMessage(BACKEND_OFFLINE_MESSAGE);
-      if (showFeedback) showToast("Could not recover cloud library");
+      if (showFeedback) showToast("Could not recover local library");
     }
-  }, [creatorMode, firebaseUser, showToast]);
+  }, [creatorMode, showToast]);
 
   useEffect(() => {
-    if (screen !== "history" || creatorMode !== "saved" || !firebaseUser) return;
-    void recoverCloudLibrary(false);
-  }, [creatorMode, firebaseUser, recoverCloudLibrary, screen]);
+    if (screen !== "history") return;
+    void recoverLocalLibrary(false);
+  }, [recoverLocalLibrary, screen]);
 
   useEffect(() => {
-    if (screen !== "recycleBin" || creatorMode !== "saved" || !firebaseUser) return;
+    if (screen !== "recycleBin") return;
     void refreshRecycleBin();
-  }, [creatorMode, firebaseUser, refreshRecycleBin, screen]);
-
-  useEffect(() => {
-    if (screen !== "admin" || creatorMode !== "saved" || !firebaseUser) return;
-    void refreshAdminSummary();
-  }, [creatorMode, firebaseUser, refreshAdminSummary, screen]);
+  }, [refreshRecycleBin, screen]);
 
   const saveCreatorProfile = useCallback(async (profile: CreatorProfile) => {
-    if (creatorMode !== "saved") {
-      setCreatorProfile(profile);
-      return true;
-    }
-
-    try {
-      const profileGenre = genreFromProfileBio(profile.bio) ?? selectedGenre;
-      const response = await backendApi.saveProfile(creatorMode, firebaseUser, {
-        ...profile,
-        bio: profileBioWithDefaultGenre(profile.bio, profileGenre)
-      });
-      const savedGenre = genreFromProfileBio(response.profile.bio);
-      if (savedGenre) setSelectedGenre(savedGenre);
-      setCreatorProfile({
-        name: response.profile.name,
-        email: response.profile.email,
-        bio: cleanProfileBio(response.profile.bio),
-        avatarUri: response.profile.photo_url ?? undefined
-      });
-      setBackendMode("api");
-      setBackendMessage(BACKEND_CONNECTED_MESSAGE);
-      return true;
-    } catch {
-      setBackendMode("offline");
-      setBackendMessage(BACKEND_OFFLINE_MESSAGE);
-      showToast("Could not save cloud profile");
-      return false;
-    }
-  }, [creatorMode, firebaseUser, selectedGenre, setSelectedGenre, showToast]);
+    setCreatorProfile(profile);
+    return true;
+  }, []);
 
   const deleteCurrentGeneration = useCallback(() => {
     const deletedId = backendJobId ?? currentGeneratedTrackId;
     if (backendJobId) {
       setDeletedBackendTrackIds((current) => current.includes(backendJobId) ? current : [...current, backendJobId]);
-      backendApi.deleteTrack(creatorMode, firebaseUser, backendJobId).then(() => {
+      backendApi.deleteTrack(creatorMode, backendJobId).then(() => {
         refreshBackendHistory();
         refreshRecycleBin();
       }).catch(() => {
@@ -2038,18 +1653,18 @@ function App() {
     });
     showToast("Moved to Recently Deleted");
     setScreen("home");
-  }, [backendJobId, creatorMode, currentGeneratedTrackId, firebaseUser, refreshBackendHistory, refreshRecycleBin, showToast]);
+  }, [backendJobId, creatorMode, currentGeneratedTrackId, refreshBackendHistory, refreshRecycleBin, showToast]);
 
   const deleteBackendHistoryTrack = useCallback((jobId: string) => {
     setDeletedBackendTrackIds((current) => current.includes(jobId) ? current : [...current, jobId]);
-    backendApi.deleteTrack(creatorMode, firebaseUser, jobId).then(() => {
+    backendApi.deleteTrack(creatorMode, jobId).then(() => {
       refreshBackendHistory();
       refreshRecycleBin();
       showToast("Moved to Recently Deleted");
     }).catch(() => {
       showToast("Removed locally. Backend delete will retry later.");
     });
-  }, [creatorMode, firebaseUser, refreshBackendHistory, refreshRecycleBin, showToast]);
+  }, [creatorMode, refreshBackendHistory, refreshRecycleBin, showToast]);
 
   const deleteGeneratedTrack = useCallback((trackId: string) => {
     setGeneratedTracks((current) => {
@@ -2105,10 +1720,10 @@ function App() {
   }, [clearSkarlySession, showToast, voiceTakes.length]);
 
   const playVoiceTake = useCallback(async (take: VoiceTake) => {
-    const getCloudPlaybackUri = async () => {
+    const getLocalPlaybackUri = async () => {
       if (!take.uploaded || !take.rawAudioPath) return undefined;
-      showToast("Preparing cloud playback");
-      const response = await backendApi.getVoiceTakePlayback(creatorMode, firebaseUser, take.id);
+      showToast("Preparing local playback");
+      const response = await backendApi.getVoiceTakePlayback(creatorMode, take.id);
       setVoiceTakes((current) => current.map((item) => item.id === take.id ? { ...item, fileUri: response.raw_audio_url } : item));
       return response.raw_audio_url;
     };
@@ -2178,10 +1793,10 @@ function App() {
       }
 
       let playbackUri = take.fileUri?.startsWith("blob:") && take.uploaded ? undefined : take.fileUri;
-      playbackUri = playbackUri ?? await getCloudPlaybackUri();
+      playbackUri = playbackUri ?? await getLocalPlaybackUri();
 
       if (!playbackUri) {
-        showToast(take.uploadState === "failed" ? "Upload failed. Retry upload before playback." : "This take needs cloud upload before playback.");
+        showToast(take.uploadState === "failed" ? "Upload failed. Retry upload before playback." : "This take must be saved locally before playback.");
         return;
       }
 
@@ -2189,15 +1804,15 @@ function App() {
         await startPlayback(playbackUri);
       } catch (firstError) {
         if (!take.rawAudioPath) throw firstError;
-        const cloudUri = await getCloudPlaybackUri();
-        if (!cloudUri || cloudUri === playbackUri) throw firstError;
-        await startPlayback(cloudUri);
+        const localUri = await getLocalPlaybackUri();
+        if (!localUri || localUri === playbackUri) throw firstError;
+        await startPlayback(localUri);
       }
     } catch (error) {
       showToast(`Could not play this voice take: ${errorMessage(error)}`);
       setPlayingVoiceTakeId(null);
     }
-  }, [creatorMode, firebaseUser, playingVoiceTakeId, showToast]);
+  }, [creatorMode, playingVoiceTakeId, showToast]);
 
   const playUrl = useCallback(async (url: string, startPositionMs = 0) => {
     try {
@@ -2354,17 +1969,17 @@ function App() {
 
   const persistSelectedSkarlyVersion = useCallback(async (index: number) => {
     if (!skarlyResult) throw new Error("No Skarly version is ready to save");
-    const response = await backendApi.selectSkarlyVersion(creatorMode, firebaseUser, skarlyResult.job_id, index);
+    const response = await backendApi.selectSkarlyVersion(creatorMode, skarlyResult.job_id, index);
     applyBackendDemoResponse(response);
     await refreshBackendHistory();
     return response;
-  }, [applyBackendDemoResponse, creatorMode, firebaseUser, refreshBackendHistory, skarlyResult]);
+  }, [applyBackendDemoResponse, creatorMode, refreshBackendHistory, skarlyResult]);
 
   const submitSkarlyFeedback = useCallback(async (index: number, rating: number) => {
     if (!skarlyGenerationV2Id || !skarlyResult) return;
     const selected = skarlyResult.versions[index];
     try {
-      await backendApi.saveSkarlyV2Feedback(creatorMode, firebaseUser, {
+      await backendApi.saveSkarlyV2Feedback(creatorMode, {
         generation_id: skarlyGenerationV2Id,
         selected_arrangement: index,
         corrected_genre: generationIntent.genreOverride || skarlyResult.detected.genre_hint || selected?.style_family,
@@ -2377,7 +1992,7 @@ function App() {
         copyright_owner: generationIntent.trainingOptIn ? creatorProfile.name : undefined,
         commercial_use_permission: false,
         revocation_policy: generationIntent.trainingOptIn ? "Remove from future dataset versions on creator request." : undefined,
-        singer_id: generationIntent.trainingOptIn ? (firebaseUser?.uid || creatorProfile.name) : undefined,
+        singer_id: generationIntent.trainingOptIn ? creatorProfile.name : undefined,
         recording_conditions: generationIntent.trainingOptIn ? inputSource.detail : undefined,
         confirmed_singing_speech: generationIntent.trainingOptIn ? generationIntent.trainingSingingSpeech : undefined,
         confirmed_vocal_techniques: generationIntent.trainingOptIn ? generationIntent.trainingVocalTechniques : [],
@@ -2390,7 +2005,7 @@ function App() {
     } catch (error) {
       showToast(`Feedback could not be saved: ${errorMessage(error)}`);
     }
-  }, [creatorMode, creatorProfile.name, firebaseUser, generationIntent, inputSource.detail, showToast, skarlyGenerationV2Id, skarlyResult]);
+  }, [creatorMode, creatorProfile.name, generationIntent, inputSource.detail, showToast, skarlyGenerationV2Id, skarlyResult]);
 
   const remixSkarlyVersion = useCallback(async (index: number) => {
     if (!skarlyGenerationV2Id || !skarlyResult) return;
@@ -2398,13 +2013,12 @@ function App() {
     try {
       const queued = await backendApi.remixSkarlyV2(
         creatorMode,
-        firebaseUser,
         skarlyGenerationV2Id,
         index,
         generationIntent.mixPreset,
         vocalMusicBalance
       );
-      const completed = await pollSkarlyV2Job(creatorMode, firebaseUser, queued.job_id, setSkarlyV2Job, 3 * 60 * 1000);
+      const completed = await pollSkarlyV2Job(creatorMode, queued.job_id, setSkarlyV2Job, 3 * 60 * 1000);
       const finalMixUrl = String(completed.result?.final_mix_url || "");
       if (!finalMixUrl) throw new Error("The remix completed without an output URL");
       const updated: SkarlyGenerateResponse = {
@@ -2423,7 +2037,7 @@ function App() {
     } finally {
       setSkarlyRemixBusy(false);
     }
-  }, [applySelectedSkarlyVersion, creatorMode, firebaseUser, generationIntent.mixPreset, showToast, skarlyGenerationV2Id, skarlyResult, vocalMusicBalance]);
+  }, [applySelectedSkarlyVersion, creatorMode, generationIntent.mixPreset, showToast, skarlyGenerationV2Id, skarlyResult, vocalMusicBalance]);
 
   const regenerateSkarlyVersion = useCallback(async (index: number, energyDelta = 0, instrumentChange?: string) => {
     if (!skarlyGenerationV2Id || !skarlyResult) return;
@@ -2431,14 +2045,13 @@ function App() {
     try {
       const queued = await backendApi.regenerateSkarlyV2(
         creatorMode,
-        firebaseUser,
         skarlyGenerationV2Id,
         index,
         energyDelta,
         instrumentChange
       );
       setSkarlyV2Job(queued);
-      const completed = await pollSkarlyV2Job(creatorMode, firebaseUser, queued.job_id, setSkarlyV2Job, 15 * 60 * 1000);
+      const completed = await pollSkarlyV2Job(creatorMode, queued.job_id, setSkarlyV2Job, 15 * 60 * 1000);
       const updated = completed.result?.updated_generation as unknown as SkarlyGenerateResponse | undefined;
       if (!updated?.versions || updated.versions.length !== 5) throw new Error("Regeneration completed without the updated five-version set");
       setSkarlyResult(updated);
@@ -2450,7 +2063,7 @@ function App() {
     } finally {
       setSkarlyRegenerationBusy(false);
     }
-  }, [applySelectedSkarlyVersion, creatorMode, firebaseUser, showToast, skarlyGenerationV2Id, skarlyResult]);
+  }, [applySelectedSkarlyVersion, creatorMode, showToast, skarlyGenerationV2Id, skarlyResult]);
 
   const regenerateSkarlySection = useCallback(async (index: number, sectionStartSeconds: number, sectionEndSeconds: number, editInstruction: string) => {
     if (!skarlyGenerationV2Id || !skarlyResult) return;
@@ -2458,7 +2071,6 @@ function App() {
     try {
       const queued = await backendApi.regenerateSkarlyV2Section(
         creatorMode,
-        firebaseUser,
         skarlyGenerationV2Id,
         index,
         sectionStartSeconds,
@@ -2466,7 +2078,7 @@ function App() {
         editInstruction
       );
       setSkarlyV2Job(queued);
-      const completed = await pollSkarlyV2Job(creatorMode, firebaseUser, queued.job_id, setSkarlyV2Job, 15 * 60 * 1000);
+      const completed = await pollSkarlyV2Job(creatorMode, queued.job_id, setSkarlyV2Job, 15 * 60 * 1000);
       const updated = completed.result?.updated_generation as unknown as SkarlyGenerateResponse | undefined;
       if (!updated?.versions || updated.versions.length !== 5) throw new Error("Section regeneration completed without the updated five-version set");
       if (completed.result?.preserved_outside_section !== true) throw new Error("Section preservation verification was not returned");
@@ -2479,13 +2091,13 @@ function App() {
     } finally {
       setSkarlySectionBusy(false);
     }
-  }, [applySelectedSkarlyVersion, creatorMode, firebaseUser, showToast, skarlyGenerationV2Id, skarlyResult]);
+  }, [applySelectedSkarlyVersion, creatorMode, showToast, skarlyGenerationV2Id, skarlyResult]);
 
   const exportSkarlyVersion = useCallback(async (index: number) => {
     if (!skarlyGenerationV2Id || !skarlyResult) return;
     setSkarlyExportBusy(true);
     try {
-      const exported = await backendApi.exportSkarlyV2(creatorMode, firebaseUser, skarlyGenerationV2Id, index);
+      const exported = await backendApi.exportSkarlyV2(creatorMode, skarlyGenerationV2Id, index);
       setSkarlyExportResult(exported);
       const bundleUrl = backendMediaUrl(exported.files.bundle_zip);
       if (!bundleUrl) throw new Error("The studio export completed without a bundle URL");
@@ -2498,7 +2110,7 @@ function App() {
     } finally {
       setSkarlyExportBusy(false);
     }
-  }, [creatorMode, firebaseUser, showToast, skarlyGenerationV2Id, skarlyResult]);
+  }, [creatorMode, showToast, skarlyGenerationV2Id, skarlyResult]);
 
   const chooseBestSkarlyVersion = useCallback(async (index: number) => {
     if (!skarlyResult) return;
@@ -2535,7 +2147,7 @@ function App() {
     let uploadCandidate = take;
     if (take.rawAudioPath && USE_BACKEND_API) {
       try {
-        const verification = await backendApi.verifyUpload(creatorMode, firebaseUser, take.rawAudioPath);
+        const verification = await backendApi.verifyUpload(creatorMode, take.rawAudioPath);
         if (verification.exists) {
           const verifiedTake = { ...take, uploaded: true, uploadState: undefined, uploadError: undefined };
           setVoiceTakes((current) => current.map((item) => item.id === take.id ? verifiedTake : item));
@@ -2549,7 +2161,7 @@ function App() {
           const message = errorMessage(error);
           const failedTake: VoiceTake = { ...take, uploaded: false, uploadState: "failed", uploadError: message };
           setVoiceTakes((current) => current.map((item) => item.id === take.id ? failedTake : item));
-          showToast(`Cloud voice take unavailable: ${message}`);
+          showToast(`Local voice take unavailable: ${message}`);
           return failedTake;
         }
       }
@@ -2559,10 +2171,10 @@ function App() {
           ...take,
           uploaded: false,
           uploadState: "failed",
-          uploadError: "Cloud copy is missing. Record a new take or upload the file again."
+          uploadError: "Local copy is missing. Record a new take or upload the file again."
         };
         setVoiceTakes((current) => current.map((item) => item.id === take.id ? failedTake : item));
-        showToast("Cloud copy is missing. Choose another take or record again.");
+        showToast("Local copy is missing. Choose another take or record again.");
         return failedTake;
       }
 
@@ -2593,8 +2205,8 @@ function App() {
       showToast("Uploading voice take");
       setVoiceTakes((current) => current.map((item) => item.id === uploadCandidate.id ? { ...item, uploadState: "uploading", uploadError: undefined } : item));
       const extension = baseSource.contentType?.includes("webm") ? "webm" : baseSource.contentType?.includes("wav") ? "wav" : "m4a";
-      const signed = await backendApi.signUpload(creatorMode, firebaseUser, { ...baseSource, label: `${uploadCandidate.title}.${extension}` });
-      await uploadFileToCloud(uploadCandidate.fileUri, signed, baseSource.contentType ?? "audio/m4a", creatorMode, firebaseUser);
+      const signed = await backendApi.signUpload(creatorMode, { ...baseSource, label: `${uploadCandidate.title}.${extension}` });
+      await uploadFileToLocalStorage(uploadCandidate.fileUri, signed, baseSource.contentType ?? "audio/m4a", creatorMode);
       conversionTake = {
         ...uploadCandidate,
         uploadId: signed.upload_id,
@@ -2604,23 +2216,21 @@ function App() {
         uploadState: undefined,
         uploadError: undefined
       };
-      if (creatorMode === "saved") {
-        try {
-          const saved = await backendApi.saveVoiceTake(creatorMode, firebaseUser, conversionTake);
-          conversionTake = {
-            ...mapBackendVoiceTake(saved.take),
-            uploadId: signed.upload_id,
-            fileUri: uploadCandidate.fileUri,
-            uploadUrl: signed.upload_url
-          };
-        } catch {
-          showToast("Voice uploaded. Library save will retry later.");
-        }
+      try {
+        const saved = await backendApi.saveVoiceTake(creatorMode, conversionTake);
+        conversionTake = {
+          ...mapBackendVoiceTake(saved.take),
+          uploadId: signed.upload_id,
+          fileUri: uploadCandidate.fileUri,
+          uploadUrl: signed.upload_url
+        };
+      } catch {
+        showToast("Voice saved. Local library indexing will retry later.");
       }
       setVoiceTakes((current) => current.map((item) => item.id === uploadCandidate.id ? conversionTake : item));
       setBackendMode("api");
       setBackendMessage(BACKEND_CONNECTED_MESSAGE);
-      showToast("Voice take uploaded to Cloud Storage");
+      showToast("Voice take saved locally");
     } catch (error) {
       const message = errorMessage(error);
       setVoiceTakes((current) => current.map((item) => item.id === uploadCandidate.id ? { ...item, uploadState: "failed", uploadError: message } : item));
@@ -2630,10 +2240,10 @@ function App() {
     }
 
     return conversionTake;
-  }, [creatorMode, firebaseUser, showToast]);
+  }, [creatorMode, showToast]);
 
   useEffect(() => {
-    if (creatorMode !== "saved" || !firebaseUser || !USE_BACKEND_API) return;
+    if (!USE_BACKEND_API) return;
     const pendingTake = voiceTakes.find((take) =>
       take.fileUri &&
       !take.uploaded &&
@@ -2647,7 +2257,7 @@ function App() {
     uploadVoiceTake(pendingTake).finally(() => {
       setUploadingVoiceTakeIds((current) => current.filter((id) => id !== pendingTake.id));
     });
-  }, [creatorMode, firebaseUser, uploadVoiceTake, uploadingVoiceTakeIds, voiceTakes]);
+  }, [creatorMode, uploadVoiceTake, uploadingVoiceTakeIds, voiceTakes]);
 
   const useVoiceTakeForConversion = useCallback(async (take: VoiceTake) => {
     const conversionTake = await uploadVoiceTake(take);
@@ -2681,38 +2291,38 @@ function App() {
     const take = voiceTakes.find((item) => item.id === takeId);
     setVoiceTakes((current) => current.filter((item) => item.id !== takeId));
     if (take) setRecycleVoiceTakes((current) => [take, ...current.filter((item) => item.id !== take.id)]);
-    if (creatorMode === "saved" && take?.uploaded) {
-      backendApi.deleteVoiceTake(creatorMode, firebaseUser, takeId).then(() => {
+    if (take?.uploaded) {
+      backendApi.deleteVoiceTake(creatorMode, takeId).then(() => {
         refreshRecycleBin();
       }).catch(() => {
-        showToast("Removed locally. Cloud voice take delete will retry later.");
+        showToast("Removed from the UI. Local backend deletion will retry later.");
       });
     }
     showToast("Moved to Recently Deleted");
-  }, [creatorMode, firebaseUser, refreshRecycleBin, showToast, voiceTakes]);
+  }, [creatorMode, refreshRecycleBin, showToast, voiceTakes]);
 
   const restoreVoiceTake = useCallback((take: VoiceTake) => {
     setRecycleVoiceTakes((current) => current.filter((item) => item.id !== take.id));
     setVoiceTakes((current) => [take, ...current.filter((item) => item.id !== take.id)]);
-    if (creatorMode === "saved" && take.uploaded) {
-      backendApi.restoreVoiceTake(creatorMode, firebaseUser, take.id).then(() => {
+    if (take.uploaded) {
+      backendApi.restoreVoiceTake(creatorMode, take.id).then(() => {
         refreshBackendVoiceTakes();
         refreshRecycleBin();
-      }).catch(() => showToast("Restored locally. Cloud restore will retry later."));
+      }).catch(() => showToast("Restored in the UI. Local backend restore will retry later."));
     }
     showToast("Restored voice take");
-  }, [creatorMode, firebaseUser, refreshBackendVoiceTakes, refreshRecycleBin, showToast]);
+  }, [creatorMode, refreshBackendVoiceTakes, refreshRecycleBin, showToast]);
 
   const permanentlyDeleteVoiceTake = useCallback((take: VoiceTake) => {
     if (!confirmPermanentDelete(take.title)) return;
     setRecycleVoiceTakes((current) => current.filter((item) => item.id !== take.id));
-    if (creatorMode === "saved" && take.uploaded) {
-      backendApi.permanentlyDeleteVoiceTake(creatorMode, firebaseUser, take.id).then(() => {
+    if (take.uploaded) {
+      backendApi.permanentlyDeleteVoiceTake(creatorMode, take.id).then(() => {
         refreshRecycleBin();
-      }).catch(() => showToast("Could not permanently delete cloud voice take"));
+      }).catch(() => showToast("Could not permanently delete the local voice take"));
     }
     showToast("Permanently deleted voice take");
-  }, [creatorMode, firebaseUser, refreshRecycleBin, showToast]);
+  }, [creatorMode, refreshRecycleBin, showToast]);
 
   const restoreGeneratedTrack = useCallback((track: GeneratedTrackView) => {
     setDeletedGeneratedTracks((current) => current.filter((item) => item.id !== track.id));
@@ -2722,12 +2332,12 @@ function App() {
 
   const restoreBackendTrack = useCallback((jobId: string) => {
     setDeletedBackendTrackIds((current) => current.filter((id) => id !== jobId));
-    backendApi.restoreTrack(creatorMode, firebaseUser, jobId).then(() => {
+    backendApi.restoreTrack(creatorMode, jobId).then(() => {
       refreshBackendHistory();
       refreshRecycleBin();
       showToast("Restored track");
-    }).catch(() => showToast("Could not restore cloud track"));
-  }, [creatorMode, firebaseUser, refreshBackendHistory, refreshRecycleBin, showToast]);
+    }).catch(() => showToast("Could not restore the local track"));
+  }, [creatorMode, refreshBackendHistory, refreshRecycleBin, showToast]);
 
   const permanentlyDeleteGeneratedTrack = useCallback((trackId: string) => {
     const track = deletedGeneratedTracks.find((item) => item.id === trackId);
@@ -2740,11 +2350,11 @@ function App() {
     const track = recycleTracks.find((item) => item.job_id === jobId);
     if (!confirmPermanentDelete(track?.track_name ?? "this track")) return;
     setRecycleTracks((current) => current.filter((track) => track.job_id !== jobId));
-    backendApi.permanentlyDeleteTrack(creatorMode, firebaseUser, jobId).then(() => {
+    backendApi.permanentlyDeleteTrack(creatorMode, jobId).then(() => {
       refreshRecycleBin();
       showToast("Permanently deleted track");
-    }).catch(() => showToast("Could not permanently delete cloud track"));
-  }, [creatorMode, firebaseUser, recycleTracks, refreshRecycleBin, showToast]);
+    }).catch(() => showToast("Could not permanently delete the local track"));
+  }, [creatorMode, recycleTracks, refreshRecycleBin, showToast]);
 
   useEffect(() => {
     if (!generationActive) return;
@@ -2773,7 +2383,7 @@ function App() {
     const pollBackendJob = async () => {
       if (completed) return;
       try {
-        const result = await backendApi.getJob(creatorMode, firebaseUser, backendJobId);
+        const result = await backendApi.getJob(creatorMode, backendJobId);
         if (cancelled) return;
         if (result.job.status === "failed") {
           const message = result.job.error ? `Generation failed: ${result.job.error}` : "Generation failed before creating the MP3.";
@@ -2784,7 +2394,7 @@ function App() {
           setGenerationError(message);
           showToast("Generation needs attention");
           if (result.job.track_name === BACKEND_PLACEHOLDER_TRACK) {
-            backendApi.permanentlyDeleteTrack(creatorMode, firebaseUser, backendJobId).catch(() => undefined);
+            backendApi.permanentlyDeleteTrack(creatorMode, backendJobId).catch(() => undefined);
           }
           return;
         }
@@ -2816,7 +2426,7 @@ function App() {
         setBackendMessage("Generation stopped because FastAPI is offline.");
         setGenerationError("Backend connection stopped while generating. Keep FastAPI running and retry.");
         showToast("Generation paused. Retry when backend is ready.");
-        backendApi.permanentlyDeleteTrack(creatorMode, firebaseUser, failedJobId).catch(() => undefined);
+        backendApi.permanentlyDeleteTrack(creatorMode, failedJobId).catch(() => undefined);
       }
     };
 
@@ -2826,7 +2436,7 @@ function App() {
       cancelled = true;
       clearInterval(timer);
     };
-  }, [applyBackendDemoResponse, backendJobId, creatorMode, firebaseUser, generationActive, showToast]);
+  }, [applyBackendDemoResponse, backendJobId, creatorMode, generationActive, showToast]);
 
   useEffect(() => {
     if (screen !== "history" || !USE_BACKEND_API) return;
@@ -2863,22 +2473,22 @@ function App() {
     if (skarlyResult && status) {
       const index = Math.max(0, Math.min(selectedSkarlyVersionIndex, skarlyResult.versions.length - 1));
       persistSelectedSkarlyVersion(index).then((response) => {
-        return backendApi.updateJobLibrary(creatorMode, firebaseUser, response.job.job_id, rememberedTrack.title, status);
+        return backendApi.updateJobLibrary(creatorMode, response.job.job_id, rememberedTrack.title, status);
       }).then((response) => {
         applyBackendDemoResponse(response);
         refreshBackendHistory();
       }).catch(() => {
-        showToast("Saved locally. Cloud history will retry later.");
+        showToast("Saved in the UI. Local history will retry later.");
       });
     } else if (backendJobId && status) {
-      backendApi.updateJobLibrary(creatorMode, firebaseUser, backendJobId, rememberedTrack.title, status).then((response) => {
+      backendApi.updateJobLibrary(creatorMode, backendJobId, rememberedTrack.title, status).then((response) => {
         applyBackendDemoResponse(response);
         refreshBackendHistory();
       }).catch(() => {
-        showToast("Saved locally. Cloud history will retry later.");
+        showToast("Saved in the UI. Local history will retry later.");
       });
     }
-  }, [applyBackendDemoResponse, backendJobId, creatorMode, currentGeneratedTrack, firebaseUser, persistSelectedSkarlyVersion, refreshBackendHistory, selectedSkarlyVersionIndex, showToast, skarlyResult]);
+  }, [applyBackendDemoResponse, backendJobId, creatorMode, currentGeneratedTrack, persistSelectedSkarlyVersion, refreshBackendHistory, selectedSkarlyVersionIndex, showToast, skarlyResult]);
 
   const rememberGeneratedTrack = useCallback((track: GeneratedTrackView) => {
     setGeneratedTracks((current) => {
@@ -2892,17 +2502,17 @@ function App() {
   }, []);
 
   const updateBackendTrackStatus = useCallback((jobId: string, status: TrackStatus) => {
-    backendApi.updateJobLibrary(creatorMode, firebaseUser, jobId, undefined, status).then(() => {
+    backendApi.updateJobLibrary(creatorMode, jobId, undefined, status).then(() => {
       refreshBackendHistory();
-      showToast(`${status} in cloud history`);
+      showToast(`${status} in local history`);
     }).catch(() => {
-      showToast("Updated locally. Cloud history will retry later.");
+      showToast("Updated in the UI. Local history will retry later.");
     });
-  }, [creatorMode, firebaseUser, refreshBackendHistory, showToast]);
+  }, [creatorMode, refreshBackendHistory, showToast]);
 
   const playBackendTrack = useCallback(async (jobId: string) => {
     try {
-      const response = await backendApi.getJob(creatorMode, firebaseUser, jobId);
+      const response = await backendApi.getJob(creatorMode, jobId);
       if (!response.final_mp3_url) {
         showToast("Final MP3 is not ready");
         return;
@@ -2912,11 +2522,11 @@ function App() {
     } catch (error) {
       showToast(`Could not play track: ${errorMessage(error)}`);
     }
-  }, [applyBackendDemoResponse, creatorMode, firebaseUser, playUrl, showToast]);
+  }, [applyBackendDemoResponse, creatorMode, playUrl, showToast]);
 
   const downloadBackendTrack = useCallback(async (jobId: string) => {
     try {
-      const response = await backendApi.getJob(creatorMode, firebaseUser, jobId);
+      const response = await backendApi.getJob(creatorMode, jobId);
       const url = response.final_mp3_download_url ?? response.final_mp3_url;
       if (!url) {
         showToast("Final MP3 is not ready");
@@ -2924,13 +2534,13 @@ function App() {
       }
       const fileName = buildFileName(response.job.track_name || "Skarly Mix", genreFromLabel(response.job.genre) ?? selectedGenre, "keep");
       await downloadUrlToLocalFile(url, fileName);
-      await backendApi.updateJobLibrary(creatorMode, firebaseUser, jobId, undefined, "Downloaded");
+      await backendApi.updateJobLibrary(creatorMode, jobId, undefined, "Downloaded");
       refreshBackendHistory();
       showToast("Download saved locally");
     } catch (error) {
       showToast(`Download failed: ${errorMessage(error)}`);
     }
-  }, [creatorMode, firebaseUser, refreshBackendHistory, selectedGenre, showToast]);
+  }, [creatorMode, refreshBackendHistory, selectedGenre, showToast]);
 
   const finishNamingTrack = useCallback(() => {
     const cleanName = trackName.trim();
@@ -2944,15 +2554,15 @@ function App() {
       status: getGeneratedTrackStatus(creatorMode, hasSaved, hasDownloaded, hasShared)
     });
     if (backendJobId) {
-      backendApi.updateJobLibrary(creatorMode, firebaseUser, backendJobId, buildTrackTitle(cleanName, selectedGenre, fileNameMode), "Ready").then((response) => {
+      backendApi.updateJobLibrary(creatorMode, backendJobId, buildTrackTitle(cleanName, selectedGenre, fileNameMode), "Ready").then((response) => {
         applyBackendDemoResponse(response);
         refreshBackendHistory();
       }).catch(() => {
-        showToast("Named locally. Cloud history will retry later.");
+        showToast("Named in the UI. Local history will retry later.");
       });
     }
     setScreen("nameSuccess");
-  }, [applyBackendDemoResponse, backendJobId, creatorMode, currentGeneratedTrackId, fileNameMode, firebaseUser, hasDownloaded, hasSaved, hasShared, inputSource, refreshBackendHistory, rememberGeneratedTrack, selectedGenre, showToast, trackName]);
+  }, [applyBackendDemoResponse, backendJobId, creatorMode, currentGeneratedTrackId, fileNameMode, hasDownloaded, hasSaved, hasShared, inputSource, refreshBackendHistory, rememberGeneratedTrack, selectedGenre, showToast, trackName]);
 
   const ensureSkarlySourceUploaded = useCallback(async () => {
     if (!USE_BACKEND_API) {
@@ -2966,19 +2576,19 @@ function App() {
 
     let generationSource = inputSource;
     try {
-      const verification = await backendApi.verifyUpload(creatorMode, firebaseUser, inputSource.rawAudioPath);
+      const verification = await backendApi.verifyUpload(creatorMode, inputSource.rawAudioPath);
       if (!verification.exists) {
         if (!inputSource.fileUri) {
-          const message = "Cloud audio file is missing. Record or upload again.";
+          const message = "Local audio file is missing. Record or upload again.";
           setBackendMode("offline");
           setBackendMessage(message);
           setGenerationError(message);
-          showToast("Cloud audio is missing. Record or upload the audio again.");
+          showToast("Local audio is missing. Record or upload the audio again.");
           return null;
         }
-        showToast("Cloud audio missing. Re-uploading now.");
-        const signed = await backendApi.signUpload(creatorMode, firebaseUser, inputSource);
-        await uploadFileToCloud(inputSource.fileUri, signed, inputSource.contentType ?? "audio/mpeg", creatorMode, firebaseUser);
+        showToast("Local audio missing. Re-uploading now.");
+        const signed = await backendApi.signUpload(creatorMode, inputSource);
+        await uploadFileToLocalStorage(inputSource.fileUri, signed, inputSource.contentType ?? "audio/mpeg", creatorMode);
         generationSource = {
           ...inputSource,
           uploadId: signed.upload_id,
@@ -2992,7 +2602,7 @@ function App() {
       if (!isMissingVerifyRouteError(error)) throw error;
     }
     return generationSource;
-  }, [creatorMode, firebaseUser, inputSource, showToast]);
+  }, [creatorMode, inputSource, showToast]);
 
   const analyzeSkarlySource = useCallback(async () => {
     try {
@@ -3002,10 +2612,10 @@ function App() {
       setGenerationError(null);
       setBackendMode("api");
       setBackendMessage("Skarly is detecting language, mood, melody, and timing.");
-      const queued = await backendApi.createSkarlyV2Analysis(creatorMode, firebaseUser, generationSource);
+      const queued = await backendApi.createSkarlyV2Analysis(creatorMode, generationSource);
       setSkarlyAnalysisV2Id(queued.job_id);
       setSkarlyV2Job(queued);
-      const completed = await pollSkarlyV2Job(creatorMode, firebaseUser, queued.job_id, (job) => {
+      const completed = await pollSkarlyV2Job(creatorMode, queued.job_id, (job) => {
         setSkarlyV2Job(job);
         setBackendMessage(formatSkarlyV2Stage(job));
       });
@@ -3040,7 +2650,7 @@ function App() {
     } finally {
       setSkarlyBusy(false);
     }
-  }, [creatorMode, ensureSkarlySourceUploaded, firebaseUser, showToast, skarlyAnalysis]);
+  }, [creatorMode, ensureSkarlySourceUploaded, showToast, skarlyAnalysis]);
 
   useEffect(() => {
     if (screen !== "genre" || !USE_BACKEND_API) return;
@@ -3050,14 +2660,14 @@ function App() {
 
   useEffect(() => {
     if (screen !== "producer" || producerProfiles.length) return;
-    backendApi.getSkarlyProducerProfiles(creatorMode, firebaseUser).then((profiles) => {
+    backendApi.getSkarlyProducerProfiles(creatorMode).then((profiles) => {
       setProducerProfiles(profiles);
       const defaults = profiles.filter((profile) => profile.is_default).map((profile) => profile.profile_id);
       if (defaults.length === 5) setSelectedProducerProfileIds(defaults);
     }).catch((error) => {
       setGenerationError(`Producer profiles could not be loaded: ${errorMessage(error)}`);
     });
-  }, [creatorMode, firebaseUser, producerProfiles.length, screen]);
+  }, [creatorMode, producerProfiles.length, screen]);
 
   const replaceProducerProfile = useCallback((index: number, profileId: string) => {
     setSelectedProducerProfileIds((current) => {
@@ -3132,7 +2742,6 @@ function App() {
       }
       const queued = await backendApi.createSkarlyV2Generation(
         creatorMode,
-        firebaseUser,
         analysisId,
         decodedDuration,
         selectedProducerProfileIds,
@@ -3142,7 +2751,7 @@ function App() {
       );
       setSkarlyGenerationV2Id(queued.job_id);
       setSkarlyV2Job(queued);
-      const completed = await pollSkarlyV2Job(creatorMode, firebaseUser, queued.job_id, (job) => {
+      const completed = await pollSkarlyV2Job(creatorMode, queued.job_id, (job) => {
         setSkarlyV2Job(job);
         setProcessingIndex(v2ProcessingStepIndex(job));
         setBackendMessage(formatSkarlyV2Stage(job));
@@ -3158,7 +2767,7 @@ function App() {
     } finally {
       setSkarlyBusy(false);
     }
-  }, [analyzeSkarlySource, creatorMode, ensureSkarlySourceUploaded, firebaseUser, finishSkarlyGeneration, generationIntent, selectedProducerProfileIds, showToast, skarlyAnalysis, skarlyAnalysisV2Id]);
+  }, [analyzeSkarlySource, creatorMode, ensureSkarlySourceUploaded, finishSkarlyGeneration, generationIntent, selectedProducerProfileIds, showToast, skarlyAnalysis, skarlyAnalysisV2Id]);
 
   const resumeGeneration = useCallback(async () => {
     if (!skarlyGenerationV2Id || skarlyV2Job?.status === "failed") {
@@ -3172,7 +2781,7 @@ function App() {
     setBackendMode("api");
     setBackendMessage("Reconnecting to the existing Skarly generation job.");
     try {
-      const latest = await backendApi.getSkarlyV2Job(creatorMode, firebaseUser, skarlyGenerationV2Id);
+      const latest = await backendApi.getSkarlyV2Job(creatorMode, skarlyGenerationV2Id);
       setSkarlyV2Job(latest);
       setProcessingIndex(v2ProcessingStepIndex(latest));
       setBackendMessage(formatSkarlyV2Stage(latest));
@@ -3181,7 +2790,7 @@ function App() {
       }
       const completed = latest.status === "ready"
         ? latest
-        : await pollSkarlyV2Job(creatorMode, firebaseUser, skarlyGenerationV2Id, (job) => {
+        : await pollSkarlyV2Job(creatorMode, skarlyGenerationV2Id, (job) => {
           setSkarlyV2Job(job);
           setProcessingIndex(v2ProcessingStepIndex(job));
           setBackendMessage(formatSkarlyV2Stage(job));
@@ -3197,12 +2806,12 @@ function App() {
     } finally {
       setSkarlyBusy(false);
     }
-  }, [creatorMode, firebaseUser, finishSkarlyGeneration, showToast, skarlyGenerationV2Id, skarlyV2Job?.status, startGeneration]);
+  }, [creatorMode, finishSkarlyGeneration, showToast, skarlyGenerationV2Id, skarlyV2Job?.status, startGeneration]);
 
   useEffect(() => {
     if (screen !== "result" || !skarlyGenerationV2Id) return;
     let cancelled = false;
-    void backendApi.getSkarlyV2Job(creatorMode, firebaseUser, skarlyGenerationV2Id)
+    void backendApi.getSkarlyV2Job(creatorMode, skarlyGenerationV2Id)
       .then((latest) => {
         if (cancelled || latest.status !== "ready" || !latest.result) return;
         setSkarlyV2Job(latest);
@@ -3216,44 +2825,17 @@ function App() {
     return () => {
       cancelled = true;
     };
-  }, [creatorMode, firebaseUser, screen, skarlyGenerationV2Id]);
+  }, [creatorMode, screen, skarlyGenerationV2Id]);
 
   const content = useMemo(() => {
-    const authTransitionScreens: Screen[] = ["splash", "login", "authSignIn", "authSignUp", "profile"];
-    const showingAuthTransition = authBusy && authTransitionScreens.includes(screen);
-    const restoringAccountWorkspace = accountRestoring && ["splash", "login", "authSignIn", "authSignUp"].includes(screen);
-    const restoringSavedSession = firebaseStatus === "loading" && ["splash", "login", "authSignIn", "authSignUp"].includes(screen);
-
-    if ((screen === "splash" && startupLoading) || restoringSavedSession || showingAuthTransition || restoringAccountWorkspace) {
+    if (screen === "splash" && startupLoading) {
       return <StartupLoadingScreen />;
     }
 
     switch (screen) {
       case "splash":
       case "login":
-        return (
-          <EntryScreen
-            firebaseStatus={firebaseStatus}
-            loginChoice={loginChoice}
-            onChoose={(choice) => {
-              setCreatorMode(choice === "guest" ? "guest" : "saved");
-              setLoginChoice(choice);
-            }}
-            onContinue={(choice) => {
-              if (firebaseUser) {
-                setScreen("home");
-                return;
-              }
-              if (choice === "guest") setScreen("setup");
-              if (choice === "signin") setScreen("authSignIn");
-              if (choice === "signup") setScreen("authSignUp");
-            }}
-          />
-        );
-      case "authSignIn":
-        return <AuthScreen kind="signin" firebaseStatus={firebaseStatus} authBusy={authBusy} onBack={() => setScreen("login")} onContinue={(submission) => finishAuth(submission, "signin")} />;
-      case "authSignUp":
-        return <AuthScreen kind="signup" firebaseStatus={firebaseStatus} authBusy={authBusy} onBack={() => setScreen("login")} onContinue={(submission) => finishAuth(submission, "signup")} />;
+        return <EntryScreen onContinue={() => setScreen("setup")} />;
       case "setup":
         return <CreatorSetup intent={intent} setIntent={setIntent} genre={selectedGenre} setGenre={setSelectedGenre} onNext={() => {
           setScreen("home");
@@ -3275,7 +2857,7 @@ function App() {
           clearSkarlySession();
           setInputSource(source);
           setScreen("genre");
-        }} onHome={() => setScreen("home")} creatorMode={creatorMode} firebaseUser={firebaseUser} showToast={showToast} setBackendMode={setBackendMode} setBackendMessage={setBackendMessage} />;
+        }} onHome={() => setScreen("home")} creatorMode={creatorMode} showToast={showToast} setBackendMode={setBackendMode} setBackendMessage={setBackendMessage} />;
       case "genre":
         return <SkarlyDetectedConfirm source={inputSource} analysis={skarlyAnalysis} busy={skarlyBusy} errorMessage={generationError} onGenreSelect={setSelectedGenre} generationIntent={generationIntent} setGenerationIntent={setGenerationIntent} onBack={() => setScreen(inputSource.kind === "recording" ? "record" : "upload")} onRefresh={() => { void analyzeSkarlySource(); }} onNext={() => setScreen("producer")} />;
       case "producer":
@@ -3317,16 +2899,11 @@ function App() {
       case "recycleBin":
         return <RecycleBin voiceTakes={recycleVoiceTakes} localTracks={deletedGeneratedTracks} backendTracks={recycleTracks} onBack={() => setScreen("history")} onRestoreVoiceTake={restoreVoiceTake} onPermanentVoiceTake={permanentlyDeleteVoiceTake} onRestoreLocalTrack={restoreGeneratedTrack} onPermanentLocalTrack={permanentlyDeleteGeneratedTrack} onRestoreBackendTrack={restoreBackendTrack} onPermanentBackendTrack={permanentlyDeleteBackendTrack} />;
       case "profile":
-        return <Profile creatorMode={creatorMode} firebaseStatus={firebaseStatus} firebaseEmail={firebaseUser?.email ?? ""} isAdmin={isAdminFirebaseUser(firebaseUser)} onGoToSignup={() => setScreen("authSignUp")} profile={creatorProfile} onSaveProfile={saveCreatorProfile} defaultGenre={selectedGenre} setDefaultGenre={setSelectedGenre} backendMode={backendMode} backendMessage={backendMessage} onOpenAdmin={() => setScreen("admin")} onReset={resetAppSession} onLogout={logout} showToast={showToast} />;
-      case "admin":
-        if (!isAdminFirebaseUser(firebaseUser)) {
-          return <Profile creatorMode={creatorMode} firebaseStatus={firebaseStatus} firebaseEmail={firebaseUser?.email ?? ""} isAdmin={false} onGoToSignup={() => setScreen("authSignUp")} profile={creatorProfile} onSaveProfile={saveCreatorProfile} defaultGenre={selectedGenre} setDefaultGenre={setSelectedGenre} backendMode={backendMode} backendMessage="Admin panel is only available for the configured admin account." onOpenAdmin={() => setScreen("admin")} onReset={resetAppSession} onLogout={logout} showToast={showToast} />;
-        }
-        return <AdminPanel summary={adminSummary} loading={adminLoading} backendMode={backendMode} backendMessage={backendMessage} onBack={() => setScreen("profile")} onRefresh={refreshAdminSummary} onCleanupStale={cleanupStaleLibrary} />;
+        return <Profile profile={creatorProfile} onSaveProfile={saveCreatorProfile} defaultGenre={selectedGenre} setDefaultGenre={setSelectedGenre} backendMode={backendMode} backendMessage={backendMessage} onReset={resetAppSession} showToast={showToast} />;
       default:
         return null;
     }
-  }, [screen, startupLoading, accountRestoring, creatorMode, loginChoice, creatorProfile, firebaseUser, firebaseStatus, authBusy, intent, selectedGenre, setSelectedGenre, generationIntent, processingIndex, trackName, fileNameMode, isPlaying, activePlaybackUrl, hasDownloaded, hasShared, hasSaved, inputSource, showToast, resetAppSession, logout, finishAuth, backendMode, backendMessage, backendJobId, backendFinalUrl, backendDownloadUrl, backendIsolatedVocalUrl, backendBackingUrl, backendExportUrls, backendAnalysis, backendBlueprint, skarlyAnalysis, skarlyResult, skarlyV2Job, skarlyExportResult, producerProfiles, selectedProducerProfileIds, replaceProducerProfile, selectedSkarlyVersionIndex, skarlyBusy, skarlyRemixBusy, skarlyRegenerationBusy, skarlySectionBusy, skarlyExportBusy, vocalMusicBalance, backendTracks, adminSummary, adminLoading, recycleVoiceTakes, recycleTracks, deletedGeneratedTracks, deletedBackendTrackIds, generationActive, generationError, currentGeneratedTrack, generatedTracks, voiceTakes, playingVoiceTakeId, addVoiceTake, playVoiceTake, playBackendTrack, downloadBackendTrack, playGeneratedMix, selectSkarlyVersion, chooseBestSkarlyVersion, playSkarlyVersion, remixSkarlyVersion, regenerateSkarlyVersion, regenerateSkarlySection, exportSkarlyVersion, submitSkarlyFeedback, uploadVoiceTake, useVoiceTakeForConversion, deleteVoiceTake, restoreVoiceTake, permanentlyDeleteVoiceTake, recoverCloudLibrary, refreshAdminSummary, cleanupStaleLibrary, clearSkarlySession, deleteCurrentGeneration, deleteGeneratedTrack, deleteBackendHistoryTrack, restoreGeneratedTrack, permanentlyDeleteGeneratedTrack, restoreBackendTrack, permanentlyDeleteBackendTrack, finishNamingTrack, analyzeSkarlySource, startGeneration, resumeGeneration, saveCreatorProfile, updateBackendTrackStatus, updateGeneratedTrackStatus]);
+  }, [screen, startupLoading, creatorMode, creatorProfile, intent, selectedGenre, setSelectedGenre, generationIntent, processingIndex, trackName, fileNameMode, isPlaying, activePlaybackUrl, hasDownloaded, hasShared, hasSaved, inputSource, showToast, resetAppSession, backendMode, backendMessage, backendJobId, backendFinalUrl, backendDownloadUrl, backendIsolatedVocalUrl, backendBackingUrl, backendExportUrls, backendAnalysis, backendBlueprint, skarlyAnalysis, skarlyResult, skarlyV2Job, skarlyExportResult, producerProfiles, selectedProducerProfileIds, replaceProducerProfile, selectedSkarlyVersionIndex, skarlyBusy, skarlyRemixBusy, skarlyRegenerationBusy, skarlySectionBusy, skarlyExportBusy, vocalMusicBalance, backendTracks, recycleVoiceTakes, recycleTracks, deletedGeneratedTracks, deletedBackendTrackIds, generationActive, generationError, currentGeneratedTrack, generatedTracks, voiceTakes, playingVoiceTakeId, addVoiceTake, playVoiceTake, playBackendTrack, downloadBackendTrack, playGeneratedMix, selectSkarlyVersion, chooseBestSkarlyVersion, playSkarlyVersion, remixSkarlyVersion, regenerateSkarlyVersion, regenerateSkarlySection, exportSkarlyVersion, submitSkarlyFeedback, uploadVoiceTake, useVoiceTakeForConversion, deleteVoiceTake, restoreVoiceTake, permanentlyDeleteVoiceTake, clearSkarlySession, deleteCurrentGeneration, deleteGeneratedTrack, deleteBackendHistoryTrack, restoreGeneratedTrack, permanentlyDeleteGeneratedTrack, restoreBackendTrack, permanentlyDeleteBackendTrack, finishNamingTrack, analyzeSkarlySource, startGeneration, resumeGeneration, saveCreatorProfile, updateBackendTrackStatus, updateGeneratedTrackStatus]);
 
   return (
     <SafeAreaView style={styles.safe}>
@@ -3340,7 +2917,7 @@ function App() {
 
 function AppShell({ children, screen, setScreen, toastMessage }: { children: React.ReactNode; screen: Screen; setScreen: (screen: Screen) => void; toastMessage: string }) {
   const lockedCreationScreens: Screen[] = ["genre", "producer", "processing", "nameTrack", "nameSuccess", "result", "download"];
-  const showBottomNav = !["splash", "login", "authSignIn", "authSignUp", "setup", ...lockedCreationScreens].includes(screen);
+  const showBottomNav = !["splash", "login", "setup", ...lockedCreationScreens].includes(screen);
   const lockScreenScroll = screen === "splash";
   const [navVisible, setNavVisible] = useState(true);
   const lastScrollY = useRef(0);
@@ -3538,45 +3115,16 @@ function ScreenHeader({ title, hint, onBack, action }: { title: string; hint: st
   );
 }
 
-function EntryScreen({
-  firebaseStatus,
-  loginChoice,
-  onChoose,
-  onContinue
-}: {
-  firebaseStatus: FirebaseSetupStatus;
-  loginChoice: LoginChoice;
-  onChoose: (choice: Exclude<LoginChoice, null>) => void;
-  onContinue: (choice: Exclude<LoginChoice, null>) => void;
-}) {
+function EntryScreen({ onContinue }: { onContinue: () => void }) {
   const imageReveal = useRef(new Animated.Value(0)).current;
   const titleReveal = useRef(new Animated.Value(0)).current;
   const ctaReveal = useRef(new Animated.Value(0)).current;
-  const hasChoice = loginChoice !== null;
-  const choiceCopy = loginChoice === "guest"
-    ? "Try the studio right away. Drafts, recordings, and mixes stay in this session only."
-    : loginChoice === "signin"
-      ? "Return to your saved workspace with your private history and settings."
-      : "Create a private creator workspace for saved tracks and future synced history.";
-  const choiceTitle = loginChoice === "guest" ? "Guest Creator" : loginChoice === "signin" ? "Saved Workspace" : "New Workspace";
 
   useEffect(() => {
     Animated.sequence([
-      Animated.timing(imageReveal, {
-        toValue: 1,
-        duration: 520,
-        useNativeDriver: true
-      }),
-      Animated.timing(titleReveal, {
-        toValue: 1,
-        duration: 560,
-        useNativeDriver: true
-      }),
-      Animated.timing(ctaReveal, {
-        toValue: 1,
-        duration: 520,
-        useNativeDriver: true
-      })
+      Animated.timing(imageReveal, { toValue: 1, duration: 520, useNativeDriver: true }),
+      Animated.timing(titleReveal, { toValue: 1, duration: 560, useNativeDriver: true }),
+      Animated.timing(ctaReveal, { toValue: 1, duration: 520, useNativeDriver: true })
     ]).start();
   }, [ctaReveal, imageReveal, titleReveal]);
 
@@ -3587,129 +3135,19 @@ function EntryScreen({
           <View style={styles.splashBottomFadeStrong} />
         </ImageBackground>
       </Animated.View>
-      <Animated.View
-        style={[
-          styles.entryTitleBlock,
-          {
-            opacity: titleReveal,
-            transform: [
-              {
-                translateY: titleReveal.interpolate({
-                  inputRange: [0, 1],
-                  outputRange: [22, 0]
-                })
-              },
-              {
-                scale: titleReveal.interpolate({
-                  inputRange: [0, 1],
-                  outputRange: [0.92, 1]
-                })
-              }
-            ]
-          }
-        ]}
-      >
+      <Animated.View style={[styles.entryTitleBlock, { opacity: titleReveal, transform: [{ translateY: titleReveal.interpolate({ inputRange: [0, 1], outputRange: [22, 0] }) }, { scale: titleReveal.interpolate({ inputRange: [0, 1], outputRange: [0.92, 1] }) }] }]}>
         <Image source={require("./assets/logo.png")} resizeMode="contain" style={styles.entryWordmark} />
-        <View style={styles.entryChoiceStack}>
-          <EntryChoiceButton label="Guest" icon="guest" selected={loginChoice === "guest"} onPress={() => onChoose("guest")} />
-          {loginChoice === "guest" && <EntryChoiceInfo title={choiceTitle} body={choiceCopy} />}
-          <EntryChoiceButton label="Sign Up" icon="edit" selected={loginChoice === "signup"} onPress={() => onChoose("signup")} />
-          {loginChoice === "signup" && <EntryChoiceInfo title={choiceTitle} body={choiceCopy} />}
-          <EntryChoiceButton label="Sign In" icon="saved" selected={loginChoice === "signin"} onPress={() => onChoose("signin")} />
-          {loginChoice === "signin" && <EntryChoiceInfo title={choiceTitle} body={choiceCopy} />}
+        <View style={styles.entryChoiceInfo}>
+          <Text style={styles.entryChoiceTitle}>Local Guest Studio</Text>
+          <Text style={styles.entryChoiceBody}>Record or upload audio, build five producer versions, mix locally, and export without an account or cloud service.</Text>
         </View>
-        {firebaseStatus === "unconfigured" && <StatusNotice title="Firebase Setup Needed" body="Guest mode still works. Add Expo Firebase env values to enable saved accounts." icon="error" />}
-        {firebaseStatus === "unavailable" && <StatusNotice title="Manual Sign In" body="Saved session restore timed out. Choose Sign In to continue." icon="error" />}
-        <Animated.View
-          style={[
-            styles.entryContinueWrap,
-            {
-              opacity: ctaReveal,
-              transform: [
-                {
-                  translateY: ctaReveal.interpolate({
-                    inputRange: [0, 1],
-                    outputRange: [18, 0]
-                  })
-                }
-              ]
-            }
-          ]}
-        >
-          <PrimaryButton label={hasChoice ? loginChoice === "guest" ? "Continue as Guest" : loginChoice === "signin" ? "Go to Sign In" : "Go to Sign Up" : "Choose an Option"} icon="continue" onPress={() => hasChoice && onContinue(loginChoice)} disabled={!hasChoice} golden />
+        <Animated.View style={[styles.entryContinueWrap, { opacity: ctaReveal, transform: [{ translateY: ctaReveal.interpolate({ inputRange: [0, 1], outputRange: [18, 0] }) }] }]}>
+          <PrimaryButton label="Enter Local Studio" icon="continue" onPress={onContinue} golden />
         </Animated.View>
       </Animated.View>
     </View>
   );
 }
-
-function EntryChoiceButton({ label, icon, selected, onPress }: { label: string; icon: IconName; selected: boolean; onPress: () => void }) {
-  return (
-    <Pressable style={({ pressed }) => [styles.entryChoiceButton, selected && styles.entryChoiceButtonSelected, pressed && styles.entryChoiceButtonPressed]} onPress={onPress}>
-      <IconSymbol name={icon} tone={selected ? "ink" : "blue"} size={17} />
-      <Text style={[styles.entryChoiceText, selected && styles.entryChoiceTextSelected]}>{label}</Text>
-    </Pressable>
-  );
-}
-
-function EntryChoiceInfo({ title, body }: { title: string; body: string }) {
-  return (
-    <View style={styles.entryChoiceInfo}>
-      <Text style={styles.entryChoiceTitle}>{title}</Text>
-      <Text style={styles.entryChoiceBody}>{body}</Text>
-    </View>
-  );
-}
-
-function AuthScreen({
-  kind,
-  firebaseStatus,
-  authBusy,
-  onBack,
-  onContinue
-}: {
-  kind: "signin" | "signup";
-  firebaseStatus: FirebaseSetupStatus;
-  authBusy: boolean;
-  onBack: () => void;
-  onContinue: (submission: AuthSubmit) => void;
-}) {
-  const isSignup = kind === "signup";
-  const [name, setName] = useState(isSignup ? "" : "Saved Creator");
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
-  const normalizedEmail = email.trim().toLowerCase();
-  const passwordsMatch = password === confirmPassword;
-  const firebaseUnavailable = firebaseStatus === "unconfigured";
-  const canContinue = !authBusy && !firebaseUnavailable && email.trim().length > 0 && password.trim().length > 0 && (!isSignup || (name.trim().length > 0 && confirmPassword.trim().length > 0 && passwordsMatch));
-  return (
-    <View>
-      <ScreenHeader title={isSignup ? "Create Account" : "Sign In"} hint={isSignup ? "Set up a private creator workspace for saved tracks." : "Return to your private Skarly workspace."} />
-      <Card>
-        <Text style={styles.cardTitle}>{isSignup ? "Saved Creator" : "Welcome Back"}</Text>
-        <Text style={styles.subtitle}>{isSignup ? "Your drafts, settings, and downloads stay in one place." : "Use your saved workspace and cloud library."}</Text>
-        {firebaseStatus === "unconfigured" && <StatusNotice title="Firebase Setup Needed" body="Guest mode still works. Add Expo Firebase env values to enable saved accounts." icon="error" />}
-        {firebaseStatus === "unavailable" && <StatusNotice title="Manual Sign In" body="Saved session restore timed out. You can still sign in manually." icon="error" />}
-        {isSignup && <TextInput value={name} onChangeText={setName} placeholder="Creator name" placeholderTextColor={colors.muted} style={styles.input} />}
-        <TextInput value={email} onChangeText={setEmail} placeholder="Email address" placeholderTextColor={colors.muted} style={styles.input} keyboardType="email-address" autoCapitalize="none" />
-        <TextInput value={password} onChangeText={setPassword} placeholder="Password" placeholderTextColor={colors.muted} style={styles.input} secureTextEntry />
-        {isSignup && <TextInput value={confirmPassword} onChangeText={setConfirmPassword} placeholder="Confirm password" placeholderTextColor={colors.muted} style={styles.input} secureTextEntry />}
-        {isSignup && confirmPassword.length > 0 && !passwordsMatch && <Text style={styles.errorText}>Passwords do not match.</Text>}
-      </Card>
-      <PrimaryButton label={authBusy ? "Connecting..." : isSignup ? "Create Workspace" : "Sign In"} icon="continue" disabled={!canContinue} onPress={() => onContinue({
-        profile: {
-          name: (isSignup ? name : email.split("@")[0]).trim() || "Saved Creator",
-          email: normalizedEmail,
-          bio: "Private Skarly workspace"
-        },
-        password
-      })} />
-      <SecondaryButton label="Back To Options" icon="back" onPress={onBack} />
-    </View>
-  );
-}
-
 function LockedStudioOptions() {
   const options = ["Record idea", "Upload vocal", "Pick genre", "Build demo"];
   return (
@@ -4117,7 +3555,7 @@ function RecordVoice({ creatorMode, genre, playingVoiceTakeId, onNext, onUseTake
 
   return (
     <View>
-      <ScreenHeader title="Record Your Vocal" hint={`${creatorMode === "saved" ? "Saved creator" : "Guest creator"} session | up to ${maxDuration}s`} />
+      <ScreenHeader title="Record Your Vocal" hint={`Local guest session | up to ${maxDuration}s`} />
       <AudioRecorder seconds={seconds} maxDuration={maxDuration} isRecording={isRecording} state={recordState} onPress={toggleRecording} />
       <DurationCard seconds={seconds} maxDuration={maxDuration} />
       <VoiceCapturePanel genre={genre} seconds={seconds} maxDuration={maxDuration} isRecording={isRecording} state={recordState} micLevel={micLevel} signalWarning={hasTake && !hasMicSignal} />
@@ -4130,7 +3568,7 @@ function RecordVoice({ creatorMode, genre, playingVoiceTakeId, onNext, onUseTake
         <Card>
           <Row title={savedTake.title} meta={`${savedTake.duration}s voice memo | ${savedTake.fileUri ? "Local audio" : "No file"}`} chip={savedTake.uploaded ? "Saved" : "Temporary"} />
           <Text style={styles.subtitle}>Saved separately as a voice take. Use it now for conversion or return home and use it later.</Text>
-          <StatusNotice title={savedTake.uploaded ? "Uploaded" : "Saved Locally"} body={savedTake.uploaded ? "This voice take is already in Cloud Storage." : "Cloud upload starts when you use this take for conversion."} icon={savedTake.uploaded ? "success" : "mic"} />
+          <StatusNotice title={savedTake.uploaded ? "Stored" : "Saved Locally"} body={savedTake.uploaded ? "This voice take is in local backend storage." : "Local backend storage starts when you use this take for conversion."} icon={savedTake.uploaded ? "success" : "mic"} />
           <SecondaryButton label={playingVoiceTakeId === savedTake.id ? "Pause Take" : "Play Take"} icon={playingVoiceTakeId === savedTake.id ? "success" : "play"} onPress={() => onPlayTake(savedTake)} />
           <PrimaryButton label="Use This Take For Conversion" icon="waveform" onPress={() => onUseTake(savedTake)} golden />
           <SecondaryButton label="Save For Later Use" onPress={onHome} />
@@ -4144,7 +3582,6 @@ function UploadAudio({
   onNext,
   onHome,
   creatorMode,
-  firebaseUser,
   showToast,
   setBackendMode,
   setBackendMessage
@@ -4152,7 +3589,6 @@ function UploadAudio({
   onNext: (source: InputSource) => void;
   onHome: () => void;
   creatorMode: CreatorMode;
-  firebaseUser: User | null;
   showToast: (message: string) => void;
   setBackendMode: (mode: BackendMode) => void;
   setBackendMessage: (message: string) => void;
@@ -4223,21 +3659,21 @@ function UploadAudio({
     setUploadNotice("Preparing signed upload...");
     if (USE_BACKEND_API) {
       try {
-        const signed = await backendApi.signUpload(creatorMode, firebaseUser, nextSource);
+        const signed = await backendApi.signUpload(creatorMode, nextSource);
         nextSource.uploadId = signed.upload_id;
         nextSource.rawAudioPath = signed.raw_audio_path;
         nextSource.uploadUrl = signed.upload_url;
-        setUploadNotice("Uploading audio to Cloud Storage...");
-        await uploadFileToCloud(file.uri, signed, contentType, creatorMode, firebaseUser);
+        setUploadNotice("Saving audio to local storage...");
+        await uploadFileToLocalStorage(file.uri, signed, contentType, creatorMode);
         nextSource.uploaded = true;
         setBackendMode("api");
         setBackendMessage(BACKEND_CONNECTED_MESSAGE);
-        setUploadNotice("Audio uploaded to Cloud Storage. Ready for Skarly detection.");
+        setUploadNotice("Audio saved locally. Ready for Skarly detection.");
       } catch {
         setBackendMode("offline");
         setBackendMessage(BACKEND_OFFLINE_MESSAGE);
-        setUploadNotice("Cloud upload failed. Check FastAPI, Google credentials, and bucket permissions.");
-        showToast("Cloud upload failed");
+        setUploadNotice("Local storage upload failed. Check FastAPI, Google credentials, and bucket permissions.");
+        showToast("Local storage upload failed");
         setUploadBusy(false);
         return;
       }
@@ -4297,7 +3733,7 @@ function UploadAudio({
       <Card centered>
         <View style={styles.bigIcon}><IconSymbol name="upload" size={30} /></View>
         <Text style={styles.cardTitle}>{uploadBusy ? "Uploading Audio" : selectedFile ? "Audio Selected" : "Choose Audio File"}</Text>
-        <Text style={styles.subtitle}>{selectedFile ? `${selectedFile.label} | ${getArrangementModeLabel(selectedFile.arrangementMode)}` : uploadBusy ? "Sending audio to Cloud Storage." : "WAV, MP3, M4A, AAC, or FLAC. Pick the input mode above before generation."}</Text>
+        <Text style={styles.subtitle}>{selectedFile ? `${selectedFile.label} | ${getArrangementModeLabel(selectedFile.arrangementMode)}` : uploadBusy ? "Saving audio to local storage." : "WAV, MP3, M4A, AAC, or FLAC. Pick the input mode above before generation."}</Text>
         {selectedFile && <OwnershipChip status="Ready" label={selectedFile.uploaded ? "Uploaded" : "Ready"} />}
       </Card>
       <PrimaryButton label={uploadBusy ? "Uploading..." : "Choose Audio File"} icon="upload" onPress={chooseLocalFile} disabled={uploadBusy} />
@@ -4362,7 +3798,7 @@ function SkarlyDetectedConfirm({
         hint={source.arrangementMode === "music_to_music" ? "Confirm the reference analysis before creating five new arrangements." : "Confirm the vocal read before generating five music versions."}
         onBack={onBack}
       />
-      <StatusNotice title={busy ? "Analyzing Upload" : "Upload Ready"} body={`${source.label} | ${getArrangementModeLabel(source.arrangementMode)} | ${source.uploaded ? "Cloud uploaded" : "Waiting for upload"}`} icon={busy ? "processing" : "mic"} />
+      <StatusNotice title={busy ? "Analyzing Upload" : "Upload Ready"} body={`${source.label} | ${getArrangementModeLabel(source.arrangementMode)} | ${source.uploaded ? "Saved locally" : "Waiting for upload"}`} icon={busy ? "processing" : "mic"} />
       {errorMessage && <StatusNotice title="Needs Attention" body={errorMessage} icon="error" />}
 
       <Card>
@@ -5826,8 +5262,8 @@ function DownloadShare({
   onPlayMix: () => void | Promise<void>;
 }) {
   const fileName = buildFileName(trackName, genre, fileNameMode);
-  const status: TrackStatus = hasDownloaded ? "Downloaded" : hasShared ? "Shared" : creatorMode === "saved" && hasSaved ? "Saved" : hasSaved ? "Temporary" : "Ready";
-  const saveLabel = creatorMode === "guest" ? "Keep temporary draft" : hasSaved ? "Saved to Idea Vault" : "Save to Idea Vault";
+  const status: TrackStatus = hasDownloaded ? "Downloaded" : hasShared ? "Shared" : hasSaved ? "Saved" : "Ready";
+  const saveLabel = hasSaved ? "Saved to Local Vault" : "Save to Local Vault";
   const downloadUrl = backendDownloadUrl ?? backendFinalUrl;
   const canDownload = Boolean(downloadUrl);
   const vocalStemUrl = exportUrls.vocalStem ?? backendIsolatedVocalUrl;
@@ -5912,8 +5348,8 @@ function DownloadShare({
         }} />
         <SecondaryButton label={saveLabel} icon={hasSaved ? "success" : "saved"} onPress={() => {
           setHasSaved(true);
-          onRemember(creatorMode === "saved" ? "Saved" : "Temporary");
-          showToast(creatorMode === "guest" ? "Temporary draft kept" : "Saved to workspace");
+          onRemember("Saved");
+          showToast("Saved to local workspace");
           onNavigate("history");
         }} />
         <SecondaryButton label="Delete track" icon="trash" onPress={onDelete} />
@@ -5985,7 +5421,6 @@ function History({
   onDeleteBackendTrack: (jobId: string) => void;
   onOpenRecycleBin: () => void;
 }) {
-  const isGuest = creatorMode === "guest";
   type VisibleHistoryTrack = GeneratedTrackView & { origin: "local" | "backend" };
   const backendVisibleTracks = backendMode === "api" ? backendTracks.filter((job) => !isStaleBackendJob(job) && job.status !== "deleted" && !deletedBackendTrackIds.includes(job.job_id)).map((job) => ({
     id: job.job_id,
@@ -6002,10 +5437,10 @@ function History({
     <View>
       <ScreenHeader title="Idea Vault" hint="Your voice takes, demos, and producer packs live here." action={{ icon: "recycle", onPress: onOpenRecycleBin }} />
       <Card>
-        <Row title={isGuest ? "Guest Creator" : "Saved Creator"} meta={isGuest ? "Temporary session" : "Only you"} chip={isGuest ? "Temporary" : "Saved"} />
-        <Text style={styles.subtitle}>{isGuest ? "Guest drafts stay only for this session." : "Signed-in history is scoped to your Firebase account."}</Text>
+        <Row title="Local Guest Studio" meta="Stored on this computer" chip="Temporary" />
+        <Text style={styles.subtitle}>Recordings, mixes, and project history stay in the local Skarly workspace.</Text>
       </Card>
-      <StatusNotice title={backendMode === "api" ? "Idea Vault Connected" : "Cloud Sync Offline"} body={backendMode === "api" ? "Saved recordings and demos load from your private cloud library." : "Start FastAPI to sync private recordings and demos."} icon={backendMode === "api" ? "success" : "error"} />
+      <StatusNotice title={backendMode === "api" ? "Local Vault Connected" : "Local Backend Offline"} body={backendMode === "api" ? "Recordings and demos load from SQLite and local filesystem storage." : "Start FastAPI to access locally stored recordings and demos."} icon={backendMode === "api" ? "success" : "error"} />
       <Text style={styles.sectionTitle}>Voice Recordings</Text>
       {voiceTakes.length === 0 ? (
         <Card>
@@ -6016,7 +5451,7 @@ function History({
           <TrackListItem
             key={take.id}
             title={take.title}
-            meta={`${take.duration}s voice memo | ${take.uploadError ?? (take.uploaded ? "Cloud uploaded" : take.uploadState === "uploading" ? "Uploading to cloud" : "Local recording")} | ${take.createdAt}`}
+            meta={`${take.duration}s voice memo | ${take.uploadError ?? (take.uploaded ? "Saved locally" : take.uploadState === "uploading" ? "Saving locally" : "Local recording")} | ${take.createdAt}`}
             status={take.uploaded ? "Saved" : take.uploadState === "uploading" ? "Processing" : take.uploadState === "failed" ? "Retry" : "Temporary"}
             icon="mic"
             actions={[
@@ -6079,7 +5514,7 @@ function RecycleBin({
   return (
     <View>
       <ScreenHeader title="Recently Deleted" hint="Restore items or delete them forever." onBack={onBack} />
-      <StatusNotice title="Recycle Bin" body="Items here are hidden from your library. Delete Forever removes the cloud file and metadata." icon="recycle" />
+      <StatusNotice title="Recycle Bin" body="Items here are hidden from your library. Delete Forever removes the local file and metadata." icon="recycle" />
       <Text style={styles.sectionTitle}>Voice Recordings</Text>
       {voiceTakes.length === 0 ? (
         <Card>
@@ -6142,36 +5577,22 @@ function formatDeletedDate(value: string) {
 }
 
 function Profile({
-  creatorMode,
-  firebaseStatus,
-  firebaseEmail,
-  isAdmin,
-  onGoToSignup,
   profile,
   onSaveProfile,
   defaultGenre,
   setDefaultGenre,
   backendMode,
   backendMessage,
-  onOpenAdmin,
   onReset,
-  onLogout,
   showToast
 }: {
-  creatorMode: CreatorMode;
-  firebaseStatus: FirebaseSetupStatus;
-  firebaseEmail: string;
-  isAdmin: boolean;
-  onGoToSignup: () => void;
   profile: CreatorProfile;
   onSaveProfile: (profile: CreatorProfile) => Promise<boolean>;
   defaultGenre: Genre;
   setDefaultGenre: (genre: Genre) => void;
   backendMode: BackendMode;
   backendMessage: string;
-  onOpenAdmin: () => void;
   onReset: () => void;
-  onLogout: () => void;
   showToast: (message: string) => void;
 }) {
   const [voicePrivate, setVoicePrivate] = useState(true);
@@ -6180,9 +5601,6 @@ function Profile({
   const [draftProfile, setDraftProfile] = useState(profile);
   const [isEditingProfile, setIsEditingProfile] = useState(false);
   const initials = (profile.name.trim() || "LC").split(" ").map((part) => part[0]).join("").slice(0, 2).toUpperCase();
-  const profileStatus = creatorMode === "guest" ? "Temporary profile" : "Saved creator";
-  const visibleEmail = creatorMode === "saved" ? firebaseEmail || profile.email : profile.email;
-  const canSaveProfile = draftProfile.name.trim().length > 0;
 
   useEffect(() => {
     setDraftProfile(profile);
@@ -6194,69 +5612,53 @@ function Profile({
       copyToCacheDirectory: true,
       multiple: false
     });
-
     if (result.canceled || !result.assets[0]) return;
-    const file = result.assets[0];
-    setDraftProfile((current) => ({ ...current, avatarUri: file.uri }));
+    setDraftProfile((current) => ({ ...current, avatarUri: result.assets[0].uri }));
     showToast("Profile image selected");
   };
 
   const saveProfile = async () => {
-    const normalizedEmail = draftProfile.email.trim().toLowerCase();
     const nextProfile = {
       ...draftProfile,
       name: draftProfile.name.trim() || "Guest Creator",
-      email: creatorMode === "saved" ? visibleEmail : normalizedEmail,
-      bio: draftProfile.bio.trim() || "Private Skarly workspace"
+      email: "",
+      bio: draftProfile.bio.trim() || "Private local Skarly workspace"
     };
-    if (creatorMode === "guest" && nextProfile.email.length > 0) {
-      showToast(firebaseStatus === "ready" ? "Create an account to save this email" : "Add Firebase config to create saved accounts");
-      if (firebaseStatus === "ready") onGoToSignup();
-      return;
-    }
-    const saved = await onSaveProfile(nextProfile);
-    if (!saved) return;
+    if (!(await onSaveProfile(nextProfile))) return;
     setIsEditingProfile(false);
-    showToast(creatorMode === "saved" ? "Cloud profile saved" : "Profile details saved");
+    showToast("Local profile details saved");
   };
 
   return (
     <View>
-      <ScreenHeader title="Profile" hint="Creator identity and studio defaults." />
+      <ScreenHeader title="Profile" hint="Local creator identity and studio defaults." />
       <Card>
         <View style={styles.profileHero}>
           <Pressable style={styles.avatarButton} onPress={pickProfileImage}>
-            {draftProfile.avatarUri ? (
-              <Image source={{ uri: draftProfile.avatarUri }} resizeMode="cover" style={styles.avatarImage} />
-            ) : (
-              <Text style={styles.avatarInitials}>{initials}</Text>
-            )}
+            {draftProfile.avatarUri ? <Image source={{ uri: draftProfile.avatarUri }} resizeMode="cover" style={styles.avatarImage} /> : <Text style={styles.avatarInitials}>{initials}</Text>}
           </Pressable>
           <Pressable style={({ pressed }) => [styles.avatarEditButton, pressed && styles.touchPressedBlue]} onPress={() => setIsEditingProfile((current) => !current)}>
             <IconSymbol name="edit" tone="blue" size={18} />
           </Pressable>
           <View style={styles.profileHeroCopy}>
             <Text style={styles.cardTitle}>{profile.name}</Text>
-            <Text style={styles.metaText}>{visibleEmail || profileStatus}</Text>
+            <Text style={styles.metaText}>Local guest profile</Text>
             <Text style={styles.settingValue}>{profile.bio}</Text>
           </View>
         </View>
       </Card>
       {isEditingProfile && (
         <Card>
-          <Row title="Edit Details" meta={creatorMode === "guest" ? "Session only" : "Firebase account"} />
-          {creatorMode === "guest" && <Text style={styles.helperNote}>Add an email and save to continue into Firebase sign up. Guest sessions still stay temporary.</Text>}
-          {creatorMode === "saved" && <Text style={styles.helperNote}>Account email comes from Firebase Auth. Profile fields save to your cloud profile.</Text>}
+          <Row title="Edit Details" meta="Stored in this browser session" />
           <SecondaryButton label={draftProfile.avatarUri ? "Change Profile Image" : "Upload Profile Image"} icon="upload" onPress={pickProfileImage} />
           <TextInput value={draftProfile.name} onChangeText={(name) => setDraftProfile((current) => ({ ...current, name }))} placeholder="Creator name" placeholderTextColor={colors.muted} style={styles.input} />
-          <TextInput value={creatorMode === "saved" ? visibleEmail : draftProfile.email} onChangeText={(email) => setDraftProfile((current) => ({ ...current, email }))} placeholder="Email address" placeholderTextColor={colors.muted} style={styles.input} keyboardType="email-address" autoCapitalize="none" editable={creatorMode === "guest"} />
           <TextInput value={draftProfile.bio} onChangeText={(bio) => setDraftProfile((current) => ({ ...current, bio }))} placeholder="Short bio" placeholderTextColor={colors.muted} style={[styles.input, styles.bioInput]} multiline />
-          <PrimaryButton label="Save Profile" icon="success" onPress={saveProfile} disabled={!canSaveProfile} />
+          <PrimaryButton label="Save Local Profile" icon="success" onPress={saveProfile} disabled={!draftProfile.name.trim()} />
         </Card>
       )}
       <Text style={styles.sectionTitle}>Settings</Text>
       <Card>
-        <Row title={creatorMode === "guest" ? "Guest Creator" : "Saved Creator"} meta={creatorMode === "guest" ? "Temporary" : "Private"} />
+        <Row title="Local Guest Studio" meta="No account or cloud sync" />
         <SettingsToggle label="Voice Privacy" value="Private by default" icon="speak" enabled={voicePrivate} onPress={() => setVoicePrivate((current) => !current)} />
         <SettingsToggle label="Delete Raw Recording" value="After mix" icon="trash" enabled={deleteRaw} onPress={() => setDeleteRaw((current) => !current)} />
         <SettingsToggle label="Keep Demo Exports" value="Producer Pack retained" icon="saved" enabled={keepFinalOnly} onPress={() => setKeepFinalOnly((current) => !current)} />
@@ -6264,165 +5666,16 @@ function Profile({
           const currentIndex = genres.findIndex((genre) => genre.id === defaultGenre.id);
           const nextGenre = genres[(currentIndex + 1) % genres.length];
           setDefaultGenre(nextGenre);
-          if (creatorMode === "saved") {
-            onSaveProfile({ ...profile, bio: profileBioWithDefaultGenre(profile.bio, nextGenre) }).then((saved) => {
-              if (saved) showToast(`Default vibe saved: ${nextGenre.label}`);
-            });
-          } else {
-            showToast(`Default vibe set: ${nextGenre.label}`);
-          }
+          showToast(`Default vibe set: ${nextGenre.label}`);
         }} />
-        <DisabledSetting label="Export Data" value="After persisted history" icon="share" />
-        <DisabledSetting label="Backend" value={backendMode === "api" ? "FastAPI connected" : "Offline"} icon={backendMode === "api" ? "success" : "error"} />
+        <DisabledSetting label="Backend" value={backendMode === "api" ? "Local FastAPI connected" : "Offline"} icon={backendMode === "api" ? "success" : "error"} />
       </Card>
-      <StatusNotice title="Backend Status" body={backendMessage} icon={backendMode === "api" ? "success" : "error"} />
+      <StatusNotice title="Local Backend Status" body={backendMessage} icon={backendMode === "api" ? "success" : "error"} />
       <IntegrationStatus />
-      {creatorMode === "saved" && isAdmin && <PrimaryButton label="Open Admin Panel" icon="generate" onPress={onOpenAdmin} golden />}
-      {creatorMode === "saved" && <SecondaryButton label="Logout / Switch Account" icon="logout" onPress={onLogout} />}
-      <SecondaryButton label="Reset App Session" icon="retry" onPress={onReset} />
+      <SecondaryButton label="Reset Local Session" icon="retry" onPress={onReset} />
     </View>
   );
 }
-
-function AdminPanel({
-  summary,
-  loading,
-  backendMode,
-  backendMessage,
-  onBack,
-  onRefresh,
-  onCleanupStale
-}: {
-  summary: BackendAdminSummaryResponse | null;
-  loading: boolean;
-  backendMode: BackendMode;
-  backendMessage: string;
-  onBack: () => void;
-  onRefresh: () => void | Promise<void>;
-  onCleanupStale: () => void | Promise<void>;
-}) {
-  const counts = summary?.counts ?? {};
-  return (
-    <View>
-      <ScreenHeader title="Admin Panel" hint="Operational view for Skarly testing." onBack={onBack} />
-      <Card>
-        <Row title="Control Room" meta={summary ? `${summary.environment} | ${summary.repository_backend}` : backendMode === "api" ? "Backend connected" : "Waiting for backend"} chip={backendMode === "api" ? "Ready" : "Retry"} />
-        <Text style={styles.subtitle}>{backendMessage}</Text>
-        <View style={styles.adminMetaGrid}>
-          <MiniInfo label="Storage" value={summary?.storage_backend ?? "Unknown"} />
-          <MiniInfo label="Worker" value={summary?.worker_backend ?? "Unknown"} />
-          <MiniInfo label="Music" value={summary?.music_generator_backend ?? "Unknown"} />
-          <MiniInfo label="Task" value={summary?.task_backend ?? "Unknown"} />
-          <MiniInfo label="Bucket" value={summary?.bucket ?? "Unknown"} />
-        </View>
-      </Card>
-      <Card>
-        <Row
-          title="Cloud Status"
-          meta={summary?.cloud_runtime ? `${summary.cloud_runtime.runtime} | ${summary.cloud_runtime.region}` : "Cloud runtime details"}
-          chip={summary?.cloud_runtime?.runtime === "cloud_run" ? "Ready" : "Temporary"}
-        />
-        <View style={styles.adminMetaGrid}>
-          <MiniInfo label="Service" value={summary?.cloud_runtime?.service ?? "Unknown"} />
-          <MiniInfo label="Revision" value={summary?.cloud_runtime?.revision ?? "Unknown"} />
-          <MiniInfo label="Queue" value={summary?.cloud_runtime?.task_queue ?? "Unknown"} />
-          <MiniInfo label="Project" value={summary?.cloud_runtime?.project_id ?? "Unknown"} />
-        </View>
-        <Text style={styles.helperNote} numberOfLines={2}>{summary?.cloud_runtime?.service_url ?? "Backend URL will appear after Cloud Run deploy"}</Text>
-      </Card>
-      <PrimaryButton label={loading ? "Refreshing..." : "Refresh Admin Data"} icon="retry" onPress={onRefresh} disabled={loading} golden />
-      <SecondaryButton label="Clean Stale Library Items" icon="trash" onPress={onCleanupStale} disabled={loading} />
-      <View style={styles.adminCountGrid}>
-        <AdminCount label="Users" value={counts.users ?? 0} />
-        <AdminCount label="Jobs" value={counts.recent_jobs ?? 0} />
-        <AdminCount label="Voice Takes" value={counts.voice_takes ?? 0} />
-        <AdminCount label="Failed" value={counts.failed_jobs ?? 0} warning />
-      </View>
-      <Card>
-        <Row
-          title="Cloud Cost"
-          meta={summary?.cloud_cost ? `${summary.cloud_cost.period} | $${summary.cloud_cost.estimated_cost_usd.toFixed(2)} estimated` : "Usage estimate"}
-          chip={summary?.cloud_runtime?.runtime === "cloud_run" ? "Saved" : "Ready"}
-        />
-        <View style={styles.adminMetaGrid}>
-          <MiniInfo label="Runs" value={summary?.cloud_cost ? `${summary.cloud_cost.generations}` : "0"} />
-          <MiniInfo label="Limit" value={summary?.cloud_cost ? `${summary.cloud_cost.generation_limit}` : "25"} />
-          <MiniInfo label="Unit" value={summary?.cloud_cost ? `$${summary.cloud_cost.unit_cost_usd.toFixed(2)}` : "$0.04"} />
-          <MiniInfo label="Generator" value={summary?.cloud_cost?.generator_backend ?? "Unknown"} />
-        </View>
-      </Card>
-      <Text style={styles.sectionTitle}>Recent Users</Text>
-      {summary?.users.length ? summary.users.map((user) => (
-        <Card key={user.user_id}>
-          <Row title={user.name || "Unnamed Creator"} meta={user.email} chip="Saved" />
-          <Text style={styles.helperNote}>{shortId(user.user_id)} | Updated {formatAdminDate(user.updated_at)}</Text>
-        </Card>
-      )) : (
-        <Card><Row title="No Users Yet" meta="Saved profiles will appear here" chip="Ready" /></Card>
-      )}
-      <Text style={styles.sectionTitle}>Recent Voice Takes</Text>
-      {summary?.recent_voice_takes.length ? summary.recent_voice_takes.map((take) => (
-        <TrackListItem
-          key={take.take_id}
-          title={take.title}
-          meta={`${take.duration}s | ${take.content_type} | ${formatBytes(take.size_bytes ?? undefined)}`}
-          status={take.status === "deleted" ? "Retry" : "Saved"}
-          icon="mic"
-        />
-      )) : (
-        <Card><Row title="No Voice Takes" meta="Recordings will appear here after cloud save" chip="Ready" /></Card>
-      )}
-      <Text style={styles.sectionTitle}>Recent Jobs</Text>
-      {summary?.recent_jobs.length ? summary.recent_jobs.map((job) => (
-        <TrackListItem
-          key={job.job_id}
-          title={job.track_name || "Unnamed Job"}
-          meta={`${job.genre} | ${job.status} | ${job.error ?? job.stage}`}
-          status={backendTrackStatus(job.status, job.library_status)}
-          icon="waveform"
-        />
-      )) : (
-        <Card><Row title="No Jobs Yet" meta="Generated mixes will appear here" chip="Ready" /></Card>
-      )}
-      <Text style={styles.sectionTitle}>Recently Deleted</Text>
-      <Card>
-        <View style={styles.adminMetaGrid}>
-          <MiniInfo label="Tracks" value={`${counts.deleted_jobs ?? 0}`} />
-          <MiniInfo label="Voice Takes" value={`${counts.deleted_voice_takes ?? 0}`} />
-          <MiniInfo label="Mode" value="Soft delete" />
-        </View>
-      </Card>
-    </View>
-  );
-}
-
-function AdminCount({ label, value, warning }: { label: string; value: number; warning?: boolean }) {
-  return (
-    <View style={[styles.adminCountCard, warning && value > 0 && styles.adminCountWarning]}>
-      <Text style={styles.metaText}>{label}</Text>
-      <Text style={styles.adminCountValue}>{value}</Text>
-    </View>
-  );
-}
-
-function formatAdminDate(value: string) {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "unknown";
-  return date.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
-}
-
-function shortId(value: string) {
-  if (value.length <= 14) return value;
-  return `${value.slice(0, 8)}...${value.slice(-4)}`;
-}
-
-function formatBytes(value?: number | null) {
-  if (!value) return "Unknown size";
-  if (value < 1024) return `${value} B`;
-  if (value < 1024 * 1024) return `${Math.round(value / 1024)} KB`;
-  return `${(value / (1024 * 1024)).toFixed(1)} MB`;
-}
-
 function BottomNav({ screen, setScreen, translateY, visible }: { screen: Screen; setScreen: (screen: Screen) => void; translateY: Animated.Value; visible: boolean }) {
   const items: Array<{ label: string; screen: Screen; icon: IconName }> = [
     { label: "Create", screen: "home", icon: "home" },
@@ -6493,11 +5746,11 @@ function CreatorWorkspaceCard({ mode }: { mode: CreatorMode }) {
   const maxDuration = "300 sec";
   return (
     <View style={styles.workspaceCard}>
-      <Row title="Workspace Status" meta={mode === "guest" ? "Guest Creator" : "Saved Creator"} chip={mode === "guest" ? "Temporary" : "Saved"} />
+      <Row title="Workspace Status" meta="Local Guest Studio" chip="Temporary" />
       <View style={styles.statusStrip}>
         <View style={styles.statusPill}>
           <Text style={styles.metaText}>Mode</Text>
-          <Text style={styles.statusPillValue}>{mode === "guest" ? "Guest" : "Saved"}</Text>
+          <Text style={styles.statusPillValue}>Guest</Text>
         </View>
         <View style={styles.statusPill}>
           <Text style={styles.metaText}>Record</Text>
@@ -6505,7 +5758,7 @@ function CreatorWorkspaceCard({ mode }: { mode: CreatorMode }) {
         </View>
         <View style={styles.statusPill}>
           <Text style={styles.metaText}>Session</Text>
-          <Text style={styles.statusPillValue}>{mode === "guest" ? "Temporary" : "Private"}</Text>
+          <Text style={styles.statusPillValue}>Local</Text>
         </View>
       </View>
     </View>
@@ -6827,8 +6080,8 @@ function MusicPlayer({
         }} />
         <ActionButton label={hasSaved ? "Saved" : "Save"} icon={hasSaved ? "success" : "saved"} onPress={() => {
           setHasSaved(true);
-          onRemember(creatorMode === "saved" ? "Saved" : "Temporary");
-          showToast(creatorMode === "guest" ? "Saved to temporary vault" : "Saved to Idea Vault");
+          onRemember("Saved");
+          showToast("Saved to local Idea Vault");
           onNavigate("history");
         }} />
       </View>
@@ -7103,11 +6356,11 @@ function Toast({ message, aboveTabs }: { message: string; aboveTabs: boolean }) 
 
 function IntegrationStatus() {
   const checks = [
-    "Auth: Firebase",
-    "Upload: Cloud Storage signed URL",
-    "Jobs: local FastAPI",
-    "History: account-scoped API",
-    "Still next: Firestore profile sync"
+    "Session: local guest",
+    "Storage: local filesystem",
+    "Jobs: local FastAPI + SQLite",
+    "Generation: ACE-Step",
+    "Mixing: FFmpeg + Demucs"
   ];
   return (
     <Card>
@@ -8274,38 +7527,6 @@ const styles = StyleSheet.create({
     marginTop: 3,
     color: colors.ink,
     fontSize: 13,
-    fontWeight: "600"
-  },
-  adminMetaGrid: {
-    marginTop: 14,
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 8
-  },
-  adminCountGrid: {
-    marginTop: 14,
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 10
-  },
-  adminCountCard: {
-    width: "47%",
-    minHeight: 74,
-    borderRadius: 22,
-    padding: 14,
-    justifyContent: "center",
-    borderWidth: 1,
-    borderColor: "rgba(198,170,106,0.17)",
-    backgroundColor: "rgba(255,255,255,0.045)"
-  },
-  adminCountWarning: {
-    borderColor: "rgba(255,111,145,0.34)",
-    backgroundColor: "rgba(255,111,145,0.09)"
-  },
-  adminCountValue: {
-    marginTop: 6,
-    color: colors.ink,
-    fontSize: 25,
     fontWeight: "600"
   },
   latestPreview: {

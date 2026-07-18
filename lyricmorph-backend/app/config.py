@@ -62,13 +62,11 @@ class Settings:
     app_env: str = os.getenv("APP_ENV", os.getenv("SKARLY_ENV", "local"))
     app_public_base_url: str = os.getenv("APP_PUBLIC_BASE_URL", os.getenv("SKARLY_PUBLIC_BASE_URL", "http://127.0.0.1:8000"))
     log_level: str = os.getenv("LOG_LEVEL", os.getenv("SKARLY_LOG_LEVEL", "INFO"))
-    storage_bucket: str = os.getenv("SKARLY_STORAGE_BUCKET", "skarly-local")
     storage_backend: str = os.getenv("SKARLY_STORAGE_BACKEND", "local")
     local_storage_dir: str = os.getenv(
         "SKARLY_LOCAL_STORAGE_DIR",
         str(Path(__file__).resolve().parent.parent / ".local-storage"),
     )
-    gcs_signing_service_account: str | None = os.getenv("SKARLY_GCS_SIGNING_SERVICE_ACCOUNT")
     repository_backend: str = os.getenv("SKARLY_REPOSITORY_BACKEND", "sqlite")
     sqlite_path: str = os.getenv(
         "SKARLY_SQLITE_PATH",
@@ -119,17 +117,6 @@ class Settings:
     output_retention_days: int = int(os.getenv("OUTPUT_RETENTION_DAYS", os.getenv("SKARLY_OUTPUT_RETENTION_DAYS", "14")))
     startup_health_checks: bool = os.getenv("STARTUP_HEALTH_CHECKS", os.getenv("SKARLY_STARTUP_HEALTH_CHECKS", "true")).lower() in {"1", "true", "yes"}
     strict_safe_paths: bool = os.getenv("STRICT_SAFE_PATHS", os.getenv("SKARLY_STRICT_SAFE_PATHS", "true")).lower() in {"1", "true", "yes"}
-    online_music_enabled: bool = os.getenv("ONLINE_MUSIC_ENABLED", os.getenv("SKARLY_ONLINE_MUSIC_ENABLED", "true")).lower() in {"1", "true", "yes"}
-    music_provider_primary: str = os.getenv("MUSIC_PROVIDER_PRIMARY", os.getenv("SKARLY_MUSIC_PROVIDER_PRIMARY", "elevenlabs"))
-    music_provider_secondary: str = os.getenv("MUSIC_PROVIDER_SECONDARY", os.getenv("SKARLY_MUSIC_PROVIDER_SECONDARY", "lyria"))
-    elevenlabs_api_key: str | None = os.getenv("ELEVENLABS_API_KEY", os.getenv("SKARLY_ELEVENLABS_API_KEY", "")) or None
-    elevenlabs_music_model: str = os.getenv("ELEVENLABS_MUSIC_MODEL", os.getenv("SKARLY_ELEVENLABS_MUSIC_MODEL", "music_v2"))
-    gemini_api_key: str | None = os.getenv("GEMINI_API_KEY", os.getenv("GOOGLE_API_KEY", os.getenv("SKARLY_GEMINI_API_KEY", ""))) or None
-    lyria_pro_model: str = os.getenv("LYRIA_PRO_MODEL", os.getenv("SKARLY_LYRIA_PRO_MODEL", "lyria-3-pro-preview"))
-    online_music_timeout_seconds: int = int(os.getenv("ONLINE_MUSIC_TIMEOUT_SECONDS", os.getenv("SKARLY_ONLINE_MUSIC_TIMEOUT_SECONDS", "900")))
-    generate_candidate_count: int = int(os.getenv("GENERATE_CANDIDATE_COUNT", os.getenv("SKARLY_GENERATE_CANDIDATE_COUNT", "3")))
-    require_rights_confirmation: bool = os.getenv("REQUIRE_RIGHTS_CONFIRMATION", os.getenv("SKARLY_REQUIRE_RIGHTS_CONFIRMATION", "true")).lower() in {"1", "true", "yes"}
-    online_music_output_dir: str = os.getenv("ONLINE_MUSIC_OUTPUT_DIR", os.getenv("SKARLY_ONLINE_MUSIC_OUTPUT_DIR", "outputs/online_music"))
     skarly_output_dir: str = os.getenv("SKARLY_OUTPUT_DIR", "outputs/skarly")
     skarly_generator_backend: str = os.getenv(
         "SKARLY_GENERATOR_BACKEND",
@@ -256,29 +243,12 @@ class Settings:
     default_vocal_gain_db: float = float(os.getenv("SKARLY_DEFAULT_VOCAL_GAIN_DB", "1.5"))
     default_backing_gain_db: float = float(os.getenv("SKARLY_DEFAULT_BACKING_GAIN_DB", "-3.0"))
     default_ducking_strength: str = os.getenv("SKARLY_DEFAULT_DUCKING_STRENGTH", "medium")
-    lyria_model: str = os.getenv("SKARLY_LYRIA_MODEL", "lyria-003")
-    lyria_fallback_to_procedural: bool = os.getenv("SKARLY_LYRIA_FALLBACK_TO_PROCEDURAL", "true").lower() in {"1", "true", "yes"}
-    lyria_monthly_limit: int = int(os.getenv("SKARLY_LYRIA_MONTHLY_LIMIT", "25"))
-    lyria_unit_cost_usd: float = float(os.getenv("SKARLY_LYRIA_UNIT_COST_USD", "0.04"))
     local_llm_base_url: str = os.getenv("SKARLY_LOCAL_LLM_BASE_URL", "http://127.0.0.1:11434")
     local_llm_model: str = os.getenv("SKARLY_LOCAL_LLM_MODEL", "llama3.2:1b")
-    task_backend: str = os.getenv("SKARLY_TASK_BACKEND", "inline")
-    worker_shared_secret: str | None = os.getenv("SKARLY_WORKER_SHARED_SECRET")
-    worker_url: str | None = os.getenv("SKARLY_WORKER_URL")
-    gcp_project_id: str | None = os.getenv("GOOGLE_CLOUD_PROJECT") or os.getenv("GCP_PROJECT_ID") or os.getenv("FIREBASE_PROJECT_ID")
-    gcp_location: str = os.getenv("SKARLY_CLOUD_TASKS_LOCATION", "us-central1")
-    cloud_tasks_queue: str = os.getenv("SKARLY_CLOUD_TASKS_QUEUE", "skarly-generation")
-    cloud_tasks_service_account_email: str | None = os.getenv("SKARLY_CLOUD_TASKS_SERVICE_ACCOUNT_EMAIL")
     cors_origins: tuple[str, ...] = split_csv_env("SKARLY_CORS_ORIGINS")
     ffmpeg_path: str = os.getenv("SKARLY_FFMPEG_PATH", "ffmpeg")
     local_base_url: str = os.getenv("SKARLY_LOCAL_BASE_URL", "http://localhost:8090")
     raw_audio_ttl_hours: int = int(os.getenv("SKARLY_RAW_AUDIO_TTL_HOURS", "24"))
-    auth_mode: str = os.getenv("AUTH_MODE", "firebase_with_guest")
-    firebase_project_id: str | None = os.getenv("FIREBASE_PROJECT_ID")
-    firebase_service_account_json: str | None = os.getenv("FIREBASE_SERVICE_ACCOUNT_JSON")
-    firebase_credentials_path: str | None = os.getenv("FIREBASE_CREDENTIALS_PATH")
-    admin_emails: tuple[str, ...] = tuple(email.lower() for email in split_csv_env("SKARLY_ADMIN_EMAILS"))
-    admin_uids: tuple[str, ...] = split_csv_env("SKARLY_ADMIN_UIDS")
 
 
 settings = Settings()

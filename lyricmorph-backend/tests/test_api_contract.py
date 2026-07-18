@@ -1,12 +1,11 @@
 from fastapi.testclient import TestClient
 from urllib.parse import quote
 
-import app.auth as auth_module
 import app.main as main_module
 from app.config import Settings
 from app.main import app
-from app.models import ArrangementMode, CreatorMode, JobStatus, UserContext
-from app.repository import jobs, usage, users, voice_takes
+from app.models import ArrangementMode, JobStatus
+from app.repository import jobs, usage, voice_takes
 from app.storage import MockStorageService
 from app.tasks import InMemoryTaskQueue
 from app.worker import MockAIWorker
@@ -17,17 +16,16 @@ client = TestClient(app)
 
 def setup_function():
     jobs.clear()
-    users.clear()
     voice_takes.clear()
     usage.clear()
-    main_module.settings = Settings(app_env="local", storage_backend="mock", repository_backend="memory", worker_backend="mock", music_generator_backend="procedural_v2", task_backend="inline")
+    main_module.settings = Settings(app_env="local", storage_backend="mock", repository_backend="memory", worker_backend="mock", music_generator_backend="procedural_v2")
     main_module.worker = MockAIWorker(jobs)
     main_module.storage = MockStorageService()
     main_module.task_queue = InMemoryTaskQueue()
 
 
 def auth(user: str = "demo-user") -> dict[str, str]:
-    return {"Authorization": f"Bearer {user}"}
+    return {"Authorization": f"Bearer guest:{user}"}
 
 
 def seed_raw_audio(path: str, data: bytes = b"raw-audio") -> None:
@@ -40,25 +38,6 @@ def test_health_smoke():
     assert response.status_code == 200
     assert response.json()["ok"] is True
     assert response.json()["timeouts"]["backing_generation_timeout_sec"] == 600
-
-
-def test_studio_page_is_served():
-    response = client.get("/studio")
-    script = client.get("/studio-assets/studio.js")
-
-    assert response.status_code == 200
-    assert "Skarly Local Studio" in response.text
-    assert script.status_code == 200
-    assert "production_style" in script.text
-    assert "selectedOverrides" in script.text
-    assert "Quality Report" in response.text
-    assert "Producer Overrides" in response.text
-    assert "Compatible genre" in script.text
-    assert "Genre / Style" in script.text
-    assert "music-source-mode-select" in response.text
-    assert "preserve-original-vocal-toggle" in response.text
-    assert "source_preparation" in script.text
-    assert "transformation_quality" in script.text
 
 
 def test_local_capabilities_and_agent_plan():
@@ -86,69 +65,6 @@ def test_local_storage_routes_round_trip_uploaded_audio():
     assert download.content == b"voice-bytes"
 
 
-def test_admin_summary_returns_operational_snapshot(monkeypatch):
-    monkeypatch.setattr(main_module, "settings", Settings(app_env="local", storage_backend="mock", repository_backend="memory", worker_backend="mock", music_generator_backend="procedural_v2", task_backend="inline", admin_emails=(), admin_uids=()))
-
-    client.put(
-        "/v1/me",
-        headers=auth(),
-        json={
-            "name": "Demo Admin",
-            "email": "demo@example.com",
-            "bio": "Private Skarly workspace",
-            "photo_url": None,
-        },
-    )
-    seed_raw_audio("users/demo-user/raw/upload_test/voice.webm")
-    client.post(
-        "/v1/voice-takes",
-        headers=auth(),
-        json={
-            "title": "Voice take 1",
-            "duration": 8,
-            "raw_audio_path": "users/demo-user/raw/upload_test/voice.webm",
-            "content_type": "audio/webm",
-            "size_bytes": 12000,
-        },
-    )
-    create_uploaded_job()
-
-    response = client.get("/v1/admin/summary", headers=auth())
-
-    assert response.status_code == 200
-    data = response.json()
-    assert data["environment"] == "local"
-    assert data["repository_backend"] == "memory"
-    assert data["storage_backend"] == "mock"
-    assert data["music_generator_backend"] == "procedural_v2"
-    assert data["task_backend"] == "inline"
-    assert data["cloud_cost"]["generation_limit"] == 25
-    assert data["cloud_cost"]["generations"] == 0
-    assert data["cloud_cost"]["generator_backend"] == "procedural_v2"
-    assert data["cloud_runtime"]["runtime"] == "local"
-    assert data["cloud_runtime"]["task_queue"] == "skarly-generation"
-    assert data["counts"]["users"] == 1
-    assert data["counts"]["recent_jobs"] == 1
-    assert data["counts"]["voice_takes"] == 1
-    assert data["users"][0]["email"] == "demo@example.com"
-
-
-def test_admin_summary_rejects_non_admin_when_admin_emails_are_configured(monkeypatch):
-    monkeypatch.setattr(main_module, "settings", Settings(app_env="local", storage_backend="mock", repository_backend="memory", worker_backend="mock", music_generator_backend="procedural_v2", task_backend="inline", admin_emails=("owner@example.com",)))
-
-    response = client.get("/v1/admin/summary", headers=auth("demo-user"))
-
-    assert response.status_code == 403
-
-
-def test_admin_summary_accepts_configured_admin_uid(monkeypatch):
-    monkeypatch.setattr(main_module, "settings", Settings(app_env="local", storage_backend="mock", repository_backend="memory", worker_backend="mock", music_generator_backend="procedural_v2", task_backend="inline", admin_uids=("demo-user",)))
-
-    response = client.get("/v1/admin/summary", headers=auth("demo-user"))
-
-    assert response.status_code == 200
-
-
 def create_uploaded_job(user: str = "demo-user", delete_raw_after_mix: bool = True) -> str:
     raw_path = f"users/{user}/raw/upload_test/voice.mp3"
     seed_raw_audio(raw_path)
@@ -173,46 +89,16 @@ def test_auth_failure_returns_401():
     assert response.status_code == 401
 
 
-def test_local_test_token_is_accepted_in_test_env(monkeypatch):
-    monkeypatch.setattr(auth_module, "settings", Settings(app_env="test", auth_mode="firebase_with_guest"))
-
+def test_guest_session_token_is_accepted():
     response = client.get("/v1/history", headers=auth("demo-user"))
 
     assert response.status_code == 200
 
 
-def test_local_test_token_is_rejected_in_firebase_only_mode(monkeypatch):
-    monkeypatch.setattr(auth_module, "settings", Settings(app_env="local", auth_mode="firebase_only"))
-    monkeypatch.setattr(auth_module, "verify_firebase_token", lambda token: (_ for _ in ()).throw(ValueError("bad token")))
-
-    response = client.get("/v1/history", headers=auth("demo-user"))
+def test_unscoped_bearer_token_is_rejected():
+    response = client.get("/v1/history", headers={"Authorization": "Bearer demo-user"})
 
     assert response.status_code == 401
-
-
-def test_verified_firebase_token_scopes_user(monkeypatch):
-    monkeypatch.setattr(auth_module, "settings", Settings(app_env="local", auth_mode="firebase_only"))
-    monkeypatch.setattr(
-        auth_module,
-        "verify_firebase_token",
-        lambda token: UserContext(user_id="firebase_uid_1", creator_mode=CreatorMode.saved, email="one@example.com"),
-    )
-    seed_raw_audio("users/firebase_uid_1/raw/upload_test/voice.mp3")
-
-    response = client.post(
-        "/v1/jobs",
-        headers=auth("firebase-token"),
-        json={
-            "raw_audio_path": "users/firebase_uid_1/raw/upload_test/voice.mp3",
-            "genre": "Lo-fi",
-            "track_name": "Firebase Track",
-            "source_type": "localUpload",
-            "delete_raw_after_mix": True,
-        },
-    )
-
-    assert response.status_code == 200
-    assert response.json()["job"]["user_id"] == "firebase_uid_1"
 
 
 def test_create_job_accepts_arrangement_mode():
@@ -292,7 +178,7 @@ def test_signed_upload_response_shape():
     assert response.status_code == 200
     data = response.json()
     assert data["upload_id"].startswith("upload_")
-    assert data["raw_audio_path"].startswith("users/saved/demo-user--demo-use/raw/")
+    assert data["raw_audio_path"].startswith("users/guest/demo-user/raw/")
     assert "/test-storage/upload/" in data["upload_url"]
     assert data["expires_in_seconds"] == 900
 
@@ -300,7 +186,7 @@ def test_signed_upload_response_shape():
 def test_guest_signed_uploads_share_guest_workspace():
     response = client.post(
         "/v1/uploads/sign",
-        headers=auth("guest:demo-session"),
+        headers=auth("demo-session"),
         json={
             "filename": "guest_take.webm",
             "content_type": "audio/webm",
@@ -453,7 +339,7 @@ def test_library_recovery_builds_metadata_from_storage_objects():
     main_module.storage.upload_bytes("users/demo-user/raw/upload_old/Voice take 1.webm", b"raw", "audio/webm")
     main_module.storage.upload_bytes("users/demo-user/final/job_old/My Mix.mp3", b"mp3", "audio/mpeg")
     main_module.storage.upload_bytes("users/demo-user/final/job_stale/final.mp3", b"mp3", "audio/mpeg")
-    main_module.storage.upload_bytes("users/saved/demo-user--demo-use/raw/upload_new/New take.webm", b"raw", "audio/webm")
+    main_module.storage.upload_bytes("users/guest/demo-user--demo-use/raw/upload_new/New take.webm", b"raw", "audio/webm")
 
     response = client.post("/v1/library/recover", headers=auth())
 
@@ -480,23 +366,6 @@ def test_history_hides_stale_placeholder_jobs():
     assert response.status_code == 200
     titles = [track["track_name"] for track in response.json()["tracks"]]
     assert titles == ["Named Track"]
-
-
-def test_admin_cleanup_moves_stale_jobs_to_recycle_bin(monkeypatch):
-    monkeypatch.setattr(
-        main_module,
-        "settings",
-        Settings(app_env="local", storage_backend="mock", repository_backend="memory", worker_backend="mock", music_generator_backend="procedural_v2", task_backend="inline", admin_uids=("demo-user",)),
-    )
-    stale_id = create_uploaded_job("demo-user", delete_raw_after_mix=False)
-    main_module.jobs.update_library(stale_id, "final", None)
-    main_module.jobs.update_status(stale_id, JobStatus.ready, "ready")
-    main_module.jobs.set_final_mp3(stale_id, "users/demo-user/final/job_stale/final.mp3")
-
-    response = client.post("/v1/library/cleanup-stale", headers=auth())
-
-    assert response.status_code == 200
-    assert response.json()["tracks"][0]["status"] == "deleted"
 
 
 def test_create_job_rejects_raw_audio_path_from_another_user():
@@ -547,45 +416,6 @@ def test_voice_take_rejects_missing_raw_audio_object():
 
     assert response.status_code == 404
     assert response.json()["detail"] == "Raw audio file was not uploaded. Upload the audio before saving."
-
-
-def test_profile_can_be_saved_and_loaded():
-    save_response = client.put(
-        "/v1/me",
-        headers=auth("user-one"),
-        json={
-            "name": "Yesh",
-            "email": "YESH@example.com",
-            "bio": "Private creator",
-            "photo_url": "profile/user-one/avatar.jpg",
-        },
-    )
-
-    assert save_response.status_code == 200
-    assert save_response.json()["profile"]["email"] == "yesh@example.com"
-
-    load_response = client.get("/v1/me", headers=auth("user-one"))
-
-    assert load_response.status_code == 200
-    assert load_response.json()["profile"]["name"] == "Yesh"
-
-
-def test_duplicate_profile_email_is_rejected():
-    first = client.put(
-        "/v1/me",
-        headers=auth("user-one"),
-        json={"name": "First", "email": "same@example.com", "bio": "One"},
-    )
-    assert first.status_code == 200
-
-    second = client.put(
-        "/v1/me",
-        headers=auth("user-two"),
-        json={"name": "Second", "email": "same@example.com", "bio": "Two"},
-    )
-
-    assert second.status_code == 409
-    assert second.json()["detail"] == "Email already registered"
 
 
 def test_job_ownership_is_enforced():
@@ -644,27 +474,4 @@ def test_worker_produces_ready_job_with_download_url():
     assert data["job"]["raw_audio_path"] == "users/demo-user/raw/upload_test/voice.mp3"
     assert data["job"]["final_mp3_path"].startswith("users/demo-user/final/")
     assert "/test-storage/download/" in data["final_mp3_url"]
-
-
-def test_worker_route_requires_secret_when_configured(monkeypatch):
-    monkeypatch.setattr(
-        main_module,
-        "settings",
-        Settings(
-            app_env="local",
-            storage_backend="mock",
-            repository_backend="memory",
-            worker_backend="mock",
-            music_generator_backend="procedural_v2",
-            task_backend="cloud_tasks",
-            worker_shared_secret="worker-secret",
-        ),
-    )
-    job_id = create_uploaded_job(delete_raw_after_mix=False)
-
-    blocked = client.post(f"/v1/worker/jobs/{job_id}/run")
-    allowed = client.post(f"/v1/worker/jobs/{job_id}/run", headers={"X-Skarly-Worker-Secret": "worker-secret"})
-
-    assert blocked.status_code == 401
-    assert allowed.status_code == 200
 

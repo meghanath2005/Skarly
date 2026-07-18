@@ -10,7 +10,6 @@ from pydantic import BaseModel, Field, field_validator
 
 class CreatorMode(str, Enum):
     guest = "guest"
-    saved = "saved"
 
 
 class SourceType(str, Enum):
@@ -972,37 +971,6 @@ class SkarlyV2JobResponse(BaseModel):
     error: Optional[dict[str, Any]] = None
 
 
-class MusicCompositionPlan(BaseModel):
-    plan_id: str
-    mode: str
-    provider_prompt: str
-    negative_prompt: str
-    bpm: Optional[int] = None
-    key: Optional[str] = None
-    duration_seconds: Optional[int] = None
-    genre: Optional[str] = None
-    production_style: Optional[str] = None
-    arrangement_style: Optional[str] = None
-    mood_tags: list[str] = Field(default_factory=list)
-    instruments: list[str] = Field(default_factory=list)
-    sections: list[dict[str, Any]] = Field(default_factory=list)
-    mix_direction: str = "vocal-forward"
-    provider_preferences: list[str] = Field(default_factory=list)
-    reference_strength: Optional[float] = Field(default=None, ge=0.05, le=0.95)
-    warnings: list[str] = Field(default_factory=list)
-
-
-class OnlineGenerationDiagnostics(BaseModel):
-    status: str
-    provider_order: list[str] = Field(default_factory=list)
-    fallback_used: bool = False
-    rights_confirmed: bool = False
-    failed_step: Optional[str] = None
-    error_message: Optional[str] = None
-    suggested_fix: Optional[str] = None
-    last_logs: list[str] = Field(default_factory=list)
-
-
 class VocalLeakageQuality(BaseModel):
     status: str = "not_run"
     waveform_correlation: Optional[float] = None
@@ -1051,120 +1019,6 @@ class MusicTransformationQuality(BaseModel):
     warnings: list[str] = Field(default_factory=list)
 
 
-class OnlineGenerationCandidate(BaseModel):
-    candidate_id: str
-    provider_name: str
-    status: str
-    backing_audio_path: Optional[str] = None
-    backing_audio_url: Optional[str] = None
-    mixed_preview_path: Optional[str] = None
-    mixed_preview_url: Optional[str] = None
-    final_mix_wav_path: Optional[str] = None
-    final_mix_mp3_path: Optional[str] = None
-    final_mix_mp3_url: Optional[str] = None
-    quality_report: Optional[QualityReport] = None
-    mix_quality_report: Optional[QualityReport] = None
-    score: Optional[float] = None
-    reference_conditioned: bool = False
-    reference_strength: Optional[float] = Field(default=None, ge=0.05, le=0.95)
-    transformation_quality: Optional[MusicTransformationQuality] = None
-    diagnostics: Optional[OnlineGenerationDiagnostics] = None
-    warnings: list[str] = Field(default_factory=list)
-    prompt: Optional[str] = None
-
-
-class VocalToMusicRequest(BaseModel):
-    upload_id: str = Field(min_length=1, max_length=160)
-    lyrics: Optional[str] = None
-    language: str = "Hindi"
-    genre: Optional[str] = "Pop"
-    production_style: Optional[str] = None
-    arrangement_style: Optional[str] = None
-    mood_tags: list[str] = Field(default_factory=list)
-    instruments: list[str] = Field(default_factory=list)
-    bpm: Optional[int] = Field(default=None, ge=40, le=220)
-    key: Optional[str] = Field(default=None, max_length=40)
-    duration_seconds: Optional[int] = Field(default=None, ge=3, le=600)
-    provider_preference: Optional[str] = None
-    candidate_count: Optional[int] = Field(default=None, ge=1, le=5)
-    rights_confirmed: bool = False
-    send_source_audio_to_provider: bool = False
-    output_format: str = "mp3"
-
-    @field_validator("output_format")
-    @classmethod
-    def validate_output_format(cls, value: str) -> str:
-        normalized = value.lower().strip()
-        if normalized not in {"mp3", "wav"}:
-            raise ValueError("output_format must be 'mp3' or 'wav'")
-        return normalized
-
-
-class MusicToMusicRequest(BaseModel):
-    reference_upload_id: str = Field(min_length=1, max_length=160)
-    vocal_upload_id: Optional[str] = Field(default=None, max_length=160)
-    style_instruction: str = Field(default="Create a fresh original arrangement inspired by the broad mood and energy.", max_length=1200)
-    lyrics: Optional[str] = None
-    language: str = "Hindi"
-    genre: Optional[str] = "Pop"
-    production_style: Optional[str] = None
-    arrangement_style: Optional[str] = None
-    mood_tags: list[str] = Field(default_factory=list)
-    instruments: list[str] = Field(default_factory=list)
-    bpm: Optional[int] = Field(default=None, ge=40, le=220)
-    key: Optional[str] = Field(default=None, max_length=40)
-    duration_seconds: Optional[int] = Field(default=None, ge=3, le=600)
-    provider_preference: Optional[str] = None
-    candidate_count: Optional[int] = Field(default=None, ge=1, le=5)
-    rights_confirmed: bool = False
-    send_source_audio_to_provider: bool = False
-    source_mode: str = "auto"
-    preserve_original_vocal: bool = False
-    reference_strength: float = Field(default=0.35, ge=0.05, le=0.95)
-    output_format: str = "mp3"
-
-    @field_validator("output_format")
-    @classmethod
-    def validate_output_format(cls, value: str) -> str:
-        normalized = value.lower().strip()
-        if normalized not in {"mp3", "wav"}:
-            raise ValueError("output_format must be 'mp3' or 'wav'")
-        return normalized
-
-    @field_validator("source_mode")
-    @classmethod
-    def validate_source_mode(cls, value: str) -> str:
-        normalized = value.lower().strip().replace("-", "_")
-        if normalized not in {"auto", "instrumental", "full_song"}:
-            raise ValueError("source_mode must be 'auto', 'instrumental', or 'full_song'")
-        return normalized
-
-
-class RegenerateMusicRequest(BaseModel):
-    edit_instruction: str = Field(min_length=1, max_length=1200)
-    candidate_count: Optional[int] = Field(default=None, ge=1, le=5)
-    provider_preference: Optional[str] = None
-    reference_strength: Optional[float] = Field(default=None, ge=0.05, le=0.95)
-    rights_confirmed: bool = False
-
-
-class OnlineGenerationResponse(BaseModel):
-    job_id: str
-    status: str
-    mode: str
-    upload_id: Optional[str] = None
-    reference_upload_id: Optional[str] = None
-    vocal_upload_id: Optional[str] = None
-    analysis: Optional[VocalAnalysisReport] = None
-    reference_analysis: Optional[VocalAnalysisReport] = None
-    source_preparation: Optional[MusicSourcePreparation] = None
-    composition_plan: Optional[MusicCompositionPlan] = None
-    candidates: list[OnlineGenerationCandidate] = Field(default_factory=list)
-    best_candidate: Optional[OnlineGenerationCandidate] = None
-    diagnostics: Optional[OnlineGenerationDiagnostics] = None
-    message: Optional[str] = None
-
-
 class JobStatusResponse(BaseModel):
     job_id: str
     status: str
@@ -1211,29 +1065,6 @@ class SongBlueprint(BaseModel):
 class UserContext(BaseModel):
     user_id: str
     creator_mode: CreatorMode = CreatorMode.guest
-    email: Optional[str] = None
-
-
-class UserProfileRequest(BaseModel):
-    name: str = Field(min_length=1, max_length=80)
-    email: str = Field(min_length=3, max_length=160)
-    bio: str = Field(default="Private Skarly workspace", max_length=220)
-    photo_url: Optional[str] = None
-
-
-class UserProfile(BaseModel):
-    user_id: str
-    creator_mode: CreatorMode = CreatorMode.saved
-    name: str
-    email: str
-    bio: str = "Private Skarly workspace"
-    photo_url: Optional[str] = None
-    created_at: datetime
-    updated_at: datetime
-
-
-class UserProfileResponse(BaseModel):
-    profile: UserProfile
 
 
 class VoiceTakeRequest(BaseModel):
@@ -1389,53 +1220,6 @@ class LibraryRecoveryResponse(BaseModel):
     recovered_tracks: int
     takes: list[VoiceTakeRecord]
     tracks: list[JobRecord]
-
-
-class AdminUserSnapshot(BaseModel):
-    user_id: str
-    name: str
-    email: str
-    updated_at: datetime
-
-
-class CloudCostSnapshot(BaseModel):
-    period: str
-    generations: int
-    generation_limit: int
-    estimated_cost_usd: float
-    unit_cost_usd: float
-    generator_backend: str
-
-
-class CloudRuntimeSnapshot(BaseModel):
-    runtime: str
-    service: str
-    revision: str
-    region: str
-    project_id: Optional[str] = None
-    service_url: Optional[str] = None
-    worker_url: Optional[str] = None
-    task_queue: str
-    storage_bucket: str
-    cors_origins: list[str]
-
-
-class AdminSummaryResponse(BaseModel):
-    environment: str
-    repository_backend: str
-    storage_backend: str
-    worker_backend: str
-    music_generator_backend: str
-    task_backend: str
-    bucket: str
-    users: list[AdminUserSnapshot]
-    recent_jobs: list[JobRecord]
-    recent_voice_takes: list[VoiceTakeRecord]
-    deleted_jobs: list[JobRecord]
-    deleted_voice_takes: list[VoiceTakeRecord]
-    counts: dict[str, int]
-    cloud_cost: CloudCostSnapshot
-    cloud_runtime: CloudRuntimeSnapshot
 
 
 def now_utc() -> datetime:

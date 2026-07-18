@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import base64
 import json
 import logging
 import math
@@ -22,17 +21,13 @@ from urllib.parse import urljoin
 
 from .config import settings
 from .models import ArrangementMode, Genre, JobRecord, JobStatus, ProductionStyle, SongAnalysis, SongBlueprint, SongSection, SourceType
-from .repository import InMemoryJobRepository, usage
+from .repository import InMemoryJobRepository
 from .services import music_source, stems as stems_service
 from .storage import storage
 
 try:
-    import google.auth
-    from google.auth.transport.requests import Request as GoogleAuthRequest
     import requests
-except Exception:  # pragma: no cover - optional until Lyria mode is enabled.
-    google = None
-    GoogleAuthRequest = None
+except Exception:  # pragma: no cover - ACE-Step reports a clear dependency error.
     requests = None
 
 
@@ -2100,7 +2095,7 @@ def build_quality_report(
         "fallback_used": bool(generation_report.get("fallback_result") == "succeeded"),
         "fallback_attempted": bool(generation_report.get("fallback_attempted")),
         "fallback_result": generation_report.get("fallback_result") or "not_attempted",
-        "generator_failure_reason": generation_report.get("ace_step_error") or generation_report.get("lyria_error"),
+        "generator_failure_reason": generation_report.get("ace_step_error"),
         "ace_step_endpoint": generation_report.get("ace_step_endpoint"),
         "ace_step_health": generation_report.get("ace_step_health"),
         "backing_audio": file_status(backing_wav),
@@ -2530,42 +2525,6 @@ def create_music_bed_with_report(
         report.update(output_file_metadata(path, ffmpeg_path or settings.ffmpeg_path))
         return report
 
-    if selected_generator == "lyria":
-        try:
-            check_lyria_budget()
-            create_lyria_bed(path, genre, seconds, timing)
-            reserve_lyria_generation()
-            validation = validate_backing_output(path, seconds, ffmpeg_path or settings.ffmpeg_path)
-            report["lyria_validation"] = validation
-            if not validation["valid"]:
-                raise BackingGenerationError(
-                    "Lyria did not create a valid backing audio file: "
-                    + "; ".join(validation.get("errors") or ["unknown validation error"])
-                )
-            report["final_generator_used"] = "lyria"
-        except Exception as exc:
-            reason = f"Lyria generation failed: {exc}"
-            report["lyria_error"] = reason
-            if not settings.lyria_fallback_to_procedural:
-                raise BackingGenerationError(reason) from exc
-            report["fallback_attempted"] = True
-            report["fallback_reason"] = reason
-            create_arranged_genre_bed(path, genre, seconds, sample_rate, timing)
-            validation = validate_backing_output(path, seconds, ffmpeg_path or settings.ffmpeg_path)
-            report["procedural_v2_validation"] = validation
-            if not validation["valid"]:
-                report["fallback_result"] = "failed"
-                raise BackingGenerationError(
-                    "Backing generation failed: Lyria failed and procedural_v2 fallback did not create valid audio. "
-                    + "; ".join(validation.get("errors") or [reason])
-                )
-            report["fallback_result"] = "succeeded"
-            report["final_generator_used"] = "procedural_v2"
-            report["warnings"].append("Lyria generation failed or timed out, so Skarly used procedural_v2 fallback backing.")
-        report["completed_at"] = utc_now_iso()
-        report.update(output_file_metadata(path, ffmpeg_path or settings.ffmpeg_path))
-        return report
-
     create_genre_bed(path, genre, seconds, sample_rate, timing)
     validation = validate_backing_output(path, seconds, ffmpeg_path or settings.ffmpeg_path)
     report["procedural_v2_validation"] = validation
@@ -2835,7 +2794,7 @@ def ace_step_prompt(genre: Genre, seconds: int, timing: dict[str, float] | None 
     producer_prompt = (timing or {}).get("producer_prompt") if timing else None
     if isinstance(producer_prompt, str) and producer_prompt.strip():
         return producer_prompt.strip()
-    prompt = lyria_prompt(genre, seconds, timing)
+    prompt = backing_prompt(genre, seconds, timing)
     arrangement_mode = arrangement_mode_from_timing(timing)
     language = clean_language((timing or {}).get("language"))
     lyrics = clean_prompt_text((timing or {}).get("lyrics"), 500)
@@ -3001,116 +2960,7 @@ def ace_step_request_error(operation: str, exc: Exception) -> str:
     return f"ACE-Step {operation} failed: {exc}"
 
 
-def current_lyria_usage_key() -> str:
-    return f"lyria_{now_period()}"
-
-
-def now_period() -> str:
-    from datetime import datetime, timezone
-
-    return datetime.now(timezone.utc).strftime("%Y_%m")
-
-
-def check_lyria_budget() -> None:
-    key = current_lyria_usage_key()
-    used = usage.get(key)
-    if used >= settings.lyria_monthly_limit:
-        raise RuntimeError(f"Lyria generation limit reached ({used}/{settings.lyria_monthly_limit}). Switch to procedural_v2.")
-
-
-def reserve_lyria_generation() -> int:
-    check_lyria_budget()
-    key = current_lyria_usage_key()
-    return usage.increment(key)
-
-
-def create_lyria_bed(path: Path, genre: Genre, seconds: float = 62.0, timing: dict[str, float] | None = None) -> None:
-    if google is None or GoogleAuthRequest is None or requests is None:
-        raise RuntimeError("Lyria dependencies are not installed")
-    if not settings.gcp_project_id:
-        raise RuntimeError("Google Cloud project is required for Lyria")
-
-    token = vertex_access_token()
-    endpoint = (
-        f"https://{settings.gcp_location}-aiplatform.googleapis.com/v1/"
-        f"projects/{settings.gcp_project_id}/locations/{settings.gcp_location}/publishers/google/models/"
-        f"{settings.lyria_model}:predict"
-    )
-    prompt = lyria_prompt(genre, seconds, timing)
-    payload = {
-        "instances": [
-            {
-                "prompt": prompt,
-                "negative_prompt": "vocals, singing, spoken words, copyrighted melody, existing song, artist imitation",
-                "sample_count": 1,
-                "duration_seconds": min(30, max(10, int(seconds))),
-            }
-        ],
-        "parameters": {
-            "sample_count": 1,
-        },
-    }
-    response = requests.post(
-        endpoint,
-        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
-        json=payload,
-        timeout=180,
-    )
-    if response.status_code >= 400:
-        raise RuntimeError(f"Lyria request failed: {response.status_code} {response.text[:220]}")
-    audio_bytes = extract_lyria_audio(response.json())
-    if not audio_bytes:
-        raise RuntimeError("Lyria response did not include audio")
-    path.write_bytes(audio_bytes)
-
-
-def vertex_access_token() -> str:
-    credentials, _ = google.auth.default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
-    credentials.refresh(GoogleAuthRequest())
-    return credentials.token
-
-
-def extract_lyria_audio(data: dict[str, Any]) -> bytes:
-    candidates: list[Any] = []
-    for key in ("predictions", "candidates", "outputs"):
-        value = data.get(key)
-        if isinstance(value, list):
-            candidates.extend(value)
-    candidates.append(data)
-
-    for candidate in candidates:
-        encoded = find_base64_audio(candidate)
-        if encoded:
-            return base64.b64decode(encoded)
-    return b""
-
-
-def find_base64_audio(value: Any) -> str | None:
-    if isinstance(value, dict):
-        for key in ("audioContent", "audio_content", "bytesBase64Encoded", "bytes_base64_encoded", "data"):
-            item = value.get(key)
-            if isinstance(item, str) and looks_like_base64(item):
-                return item
-        for item in value.values():
-            found = find_base64_audio(item)
-            if found:
-                return found
-    if isinstance(value, list):
-        for item in value:
-            found = find_base64_audio(item)
-            if found:
-                return found
-    if isinstance(value, str) and looks_like_base64(value):
-        return value
-    return None
-
-
-def looks_like_base64(value: str) -> bool:
-    compact = value.strip()
-    return len(compact) > 120 and re.fullmatch(r"[A-Za-z0-9+/=\s]+", compact) is not None
-
-
-def lyria_prompt(genre: Genre, seconds: float, timing: dict[str, float] | None = None) -> str:
+def backing_prompt(genre: Genre, seconds: float, timing: dict[str, float] | None = None) -> str:
     producer_prompt = (timing or {}).get("producer_prompt") if timing else None
     if isinstance(producer_prompt, str) and producer_prompt.strip():
         return producer_prompt.strip()

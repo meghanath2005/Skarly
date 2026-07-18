@@ -6,15 +6,13 @@ services:
       - "8090:8080"
     environment:
       SKARLY_ENV: local
-      AUTH_MODE: firebase_with_guest
-      SKARLY_REPOSITORY_BACKEND: memory
+      SKARLY_REPOSITORY_BACKEND: sqlite
       SKARLY_STORAGE_BACKEND: local
       SKARLY_LOCAL_STORAGE_DIR: /app/.local-storage
       SKARLY_LOCAL_BASE_URL: http://127.0.0.1:8090
       SKARLY_WORKER_BACKEND: mvp_audio
       SKARLY_MUSIC_GENERATOR_BACKEND: procedural_v2
       SKARLY_STEM_SEPARATOR_BACKEND: "off"
-      SKARLY_TASK_BACKEND: inline
       SKARLY_FFMPEG_PATH: ffmpeg
       SKARLY_CORS_ORIGINS: http://localhost:8081,http://127.0.0.1:8081,http://127.0.0.1:8090
     volumes:
