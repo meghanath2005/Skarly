@@ -1,0 +1,18 @@
+{
+  "audio": "The Weeknd - Starboy (Raw _ Lead Acapella) - Artists Access.mp3",
+  "duration_seconds": 225.048,
+  "notebook_tempo_bpm": 184.57,
+  "notebook_key_hypothesis": "A minor",
+  "checkpoint_best_epoch": 15,
+  "checkpoint_language_accuracy": 0.967741935483871,
+  "checkpoint_genre_accuracy": 0.5434782608695652,
+  "charts": [
+    "audio_overview.png",
+    "chroma_key.png",
+    "cnn_training_curves.png",
+    "mel_mfcc.png",
+    "model_architecture.png",
+    "nn_cnn_comparison.png",
+    "spectrogram.png"
+  ]
+}

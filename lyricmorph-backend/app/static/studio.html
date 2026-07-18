@@ -1,0 +1,438 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Skarly Local Studio</title>
+    <link rel="stylesheet" href="/studio-assets/studio.css" />
+  </head>
+  <body>
+    <main class="studio-shell">
+      <header class="studio-header">
+        <div>
+          <p class="eyebrow">Hindi producer workflow</p>
+          <h1>Skarly Local Studio</h1>
+        </div>
+        <div class="status-strip">
+          <span id="backend-pill" class="pill muted">Loading presets</span>
+          <span id="phase-pill" class="pill">Phase 1-3 mock</span>
+          <span id="job-status-pill" class="pill muted">Idle</span>
+        </div>
+      </header>
+
+      <section class="studio-grid">
+        <article class="panel stack">
+          <div class="panel-head">
+            <div>
+              <p class="eyebrow">Source</p>
+              <h2>Lyrics & Preset</h2>
+            </div>
+          </div>
+
+          <label>
+            Lyrics
+            <textarea id="lyrics-input" rows="12" placeholder="Dil ki baat likho..."></textarea>
+          </label>
+
+          <div class="field-grid two">
+            <label>
+              Language
+              <select id="language-select">
+                <option>Hindi</option>
+                <option>Hinglish</option>
+                <option>Punjabi</option>
+                <option>Tamil</option>
+                <option>Telugu</option>
+                <option>English</option>
+              </select>
+            </label>
+            <label>
+              Preset
+              <select id="preset-select"></select>
+            </label>
+          </div>
+
+          <div class="info-panel">
+            <strong id="preset-name">Hindi Romantic Ballad</strong>
+            <p id="preset-description">Loading producer preset.</p>
+          </div>
+
+          <section class="panel-lite">
+            <div class="section-head">
+              <h3>Project</h3>
+              <span id="project-status" class="mini-count">Not saved</span>
+            </div>
+            <label>
+              Project name
+              <input id="project-name-input" maxlength="120" placeholder="My Hindi ballad sketch" />
+            </label>
+            <div class="button-row">
+              <button id="save-project-button" class="secondary" type="button">Save Project</button>
+              <button id="save-job-project-button" class="secondary" type="button">Save Current Job</button>
+            </div>
+            <div class="field-grid two">
+              <label>
+                Load project
+                <select id="project-list-select"></select>
+              </label>
+              <div class="button-column">
+                <button id="load-project-button" class="secondary" type="button">Load</button>
+                <button id="refresh-projects-button" class="secondary" type="button">Refresh</button>
+              </div>
+            </div>
+          </section>
+
+          <section class="panel-lite">
+            <h3>Vocal Source</h3>
+            <label>
+              Vocal audio path
+              <input id="vocal-path-input" maxlength="600" placeholder="D:\path\to\vocal.wav" />
+            </label>
+            <button id="manual-mix-button" class="secondary" type="button">Mix Current Backing</button>
+          </section>
+
+          <section class="panel-lite">
+            <div class="section-head">
+              <h3>AI Music Transformation</h3>
+              <span id="online-status" class="mini-count">No upload</span>
+            </div>
+            <label>
+              Upload vocal
+              <input id="vocal-upload-input" type="file" accept=".wav,.mp3,.m4a,.flac,.aac,.ogg,audio/*" />
+            </label>
+            <label>
+              Upload reference song
+              <input id="reference-upload-input" type="file" accept=".wav,.mp3,.m4a,.flac,.aac,.ogg,audio/*" />
+            </label>
+            <div class="field-grid two">
+              <label>
+                Provider
+                <select id="online-provider-select">
+                  <option value="">Auto</option>
+                  <option value="ace_step">Local ACE-Step (reference-aware)</option>
+                  <option value="elevenlabs">ElevenLabs Music</option>
+                  <option value="lyria">Google Lyria</option>
+                  <option value="local_fallback">Local fallback</option>
+                </select>
+              </label>
+              <label>
+                Candidates
+                <input id="candidate-count-input" type="number" min="1" max="5" step="1" value="3" />
+              </label>
+              <label>
+                Reference strength
+                <input id="reference-strength-input" type="number" min="0.05" max="0.95" step="0.05" value="0.35" />
+              </label>
+              <label>
+                Source type
+                <select id="music-source-mode-select">
+                  <option value="auto">Auto-detect vocals</option>
+                  <option value="instrumental">Instrumental only</option>
+                  <option value="full_song">Full song (force separation)</option>
+                </select>
+              </label>
+            </div>
+            <label class="toggle-row">
+              <input id="preserve-original-vocal-toggle" type="checkbox" />
+              Preserve the original singer and mix them onto the new music
+            </label>
+            <label class="toggle-row">
+              <input id="rights-confirmed-toggle" type="checkbox" />
+              I own or have rights to use this audio
+            </label>
+            <label>
+              Music-to-music / regenerate direction
+              <textarea id="online-instruction-input" rows="3" placeholder="Make it sad Bollywood rock with emotional piano, bigger drums, and space for vocal."></textarea>
+            </label>
+            <div class="button-row">
+              <button id="upload-vocal-button" class="secondary" type="button">Upload Vocal</button>
+              <button id="upload-reference-button" class="secondary" type="button">Upload Reference</button>
+              <button id="analyze-vocal-button" class="secondary" type="button">Analyze Vocal</button>
+            </div>
+            <div class="button-row">
+              <button id="vocal-to-music-button" class="primary" type="button">Generate Around Vocal</button>
+              <button id="music-to-music-button" class="secondary" type="button">Create New Music</button>
+              <button id="regenerate-online-button" class="secondary" type="button">Regenerate</button>
+            </div>
+            <pre id="online-output" class="compact-log">For music-to-new-music, upload a reference, choose a direction, confirm rights, then create candidates.</pre>
+            <div id="source-preparation-grid" class="candidate-grid"></div>
+            <div id="candidate-grid" class="candidate-grid"></div>
+          </section>
+
+          <section class="panel-lite">
+            <h3>Audio Players</h3>
+            <div class="audio-card">
+              <strong>Generated backing</strong>
+              <div id="audio-placeholder" class="placeholder-player">
+                <div class="play-dot"></div>
+                <div>
+                  <strong>No backing yet</strong>
+                  <p id="audio-placeholder-text">Backing preview appears here when ACE-Step or procedural_v2 returns a file.</p>
+                </div>
+              </div>
+              <audio id="generated-audio" controls hidden></audio>
+            </div>
+            <div class="audio-card">
+              <strong>Mixed preview</strong>
+              <div id="mixed-placeholder" class="placeholder-player">
+                <div class="play-dot"></div>
+                <div>
+                  <strong>No mix yet</strong>
+                  <p id="mixed-placeholder-text">Add a vocal path to create a vocal-forward mixed preview.</p>
+                </div>
+              </div>
+              <audio id="mixed-audio" controls hidden></audio>
+            </div>
+          </section>
+        </article>
+
+        <article class="panel stack">
+          <div class="panel-head">
+            <div>
+              <p class="eyebrow">Direction</p>
+              <h2>Genre / Style</h2>
+            </div>
+          </div>
+
+          <div class="field-grid two">
+            <label>
+              Genre
+              <select id="genre-select"></select>
+            </label>
+            <label>
+              Production Style
+              <select id="production-style-select"></select>
+            </label>
+          </div>
+
+          <label>
+            Arrangement Style
+            <select id="arrangement-style-select"></select>
+          </label>
+
+          <section>
+            <div class="section-head">
+              <h3>Mood</h3>
+              <span id="mood-count" class="mini-count">0 selected</span>
+            </div>
+            <div id="mood-chips" class="chip-grid"></div>
+          </section>
+
+          <section>
+            <div class="section-head">
+              <h3>Main Instruments</h3>
+              <span id="instrument-count" class="mini-count">0 selected</span>
+            </div>
+            <div id="instrument-chips" class="chip-grid"></div>
+          </section>
+
+          <section class="panel-lite">
+            <h3>Producer Overrides</h3>
+            <div class="field-grid three">
+              <label>
+                BPM
+                <input id="bpm-input" type="number" min="40" max="220" step="1" />
+              </label>
+              <label>
+                Key
+                <input id="key-input" maxlength="40" placeholder="F minor" />
+              </label>
+              <label>
+                Duration
+                <input id="duration-input" type="number" min="10" max="600" step="5" />
+              </label>
+              <label>
+                Energy
+                <select id="energy-select">
+                  <option value="">Auto</option>
+                  <option>low</option>
+                  <option>medium-low</option>
+                  <option>medium</option>
+                  <option>medium-high</option>
+                  <option>high</option>
+                </select>
+              </label>
+              <label>
+                Vocal Gain
+                <input id="vocal-gain-input" type="number" min="-24" max="24" step="0.5" value="2" />
+              </label>
+              <label>
+                Backing Gain
+                <input id="backing-gain-input" type="number" min="-24" max="24" step="0.5" value="-3" />
+              </label>
+            </div>
+            <div class="toggle-grid">
+              <label class="toggle-row">
+                <input id="vocal-forward-toggle" type="checkbox" checked />
+                Vocal-forward mix
+              </label>
+              <label class="toggle-row">
+                <input id="ducking-enabled-toggle" type="checkbox" checked />
+                Ducking enabled
+              </label>
+              <label>
+                Ducking Amount
+                <input id="ducking-amount-input" type="range" min="0" max="1" step="0.05" value="0.35" />
+              </label>
+            </div>
+          </section>
+
+          <div class="button-row">
+            <button id="preview-button" class="secondary">Preview Prompt</button>
+            <button id="generate-button" class="primary">Generate</button>
+          </div>
+
+          <section class="panel-lite">
+            <div class="section-head">
+              <h3>Producer Assistant</h3>
+              <span id="assistant-status" class="mini-count">Rules mode</span>
+            </div>
+            <div class="button-row">
+              <button id="improve-lyrics-button" class="secondary" type="button">Improve Lyrics</button>
+              <button id="suggest-style-button" class="secondary" type="button">Suggest Style</button>
+              <button id="explain-quality-button" class="secondary" type="button">Explain Quality</button>
+            </div>
+            <div class="button-row">
+              <button id="apply-lyrics-button" class="secondary" type="button" disabled>Apply Lyrics</button>
+              <button id="apply-style-button" class="secondary" type="button" disabled>Apply Style</button>
+            </div>
+            <pre id="assistant-output" class="compact-log">Assistant notes appear here.</pre>
+            <ul id="assistant-warning-list" class="warning-list"></ul>
+          </section>
+
+          <section class="panel-lite">
+            <div class="section-head">
+              <h3>Stems</h3>
+              <span id="stems-status" class="mini-count">Not separated</span>
+            </div>
+            <label>
+              Source audio path
+              <input id="stems-source-input" maxlength="600" placeholder="Use current generated or mixed audio" />
+            </label>
+            <button id="separate-stems-button" class="secondary" type="button">Separate Stems</button>
+            <pre id="stems-output" class="compact-log">Stem separation requires Demucs configuration.</pre>
+            <div id="stem-player-grid" class="stem-player-grid"></div>
+          </section>
+
+          <section class="panel-lite">
+            <div class="section-head">
+              <h3>Section Editor</h3>
+              <span id="section-status" class="mini-count">Prompt only</span>
+            </div>
+            <div class="field-grid three">
+              <label>
+                Section
+                <select id="section-name-select">
+                  <option>intro</option>
+                  <option>mukhda</option>
+                  <option>verse</option>
+                  <option>hook</option>
+                  <option>antara</option>
+                  <option>bridge</option>
+                  <option>outro</option>
+                </select>
+              </label>
+              <label>
+                Start
+                <input id="section-start-input" type="number" min="0" step="0.5" placeholder="Optional" />
+              </label>
+              <label>
+                End
+                <input id="section-end-input" type="number" min="0" step="0.5" placeholder="Optional" />
+              </label>
+            </div>
+            <label>
+              Edit instruction
+              <textarea id="section-instruction-input" rows="4" placeholder="Make hook more emotional."></textarea>
+            </label>
+            <div class="button-row">
+              <button id="build-section-prompt-button" class="secondary" type="button">Build Edit Prompt</button>
+              <button id="edit-section-button" class="secondary" type="button">Edit Section</button>
+            </div>
+            <pre id="section-output" class="compact-log">Section edit prompt appears here.</pre>
+            <audio id="section-audio" controls hidden></audio>
+          </section>
+        </article>
+
+        <article class="panel stack">
+          <div class="panel-head">
+            <div>
+              <p class="eyebrow">Output</p>
+              <h2>Prompt Preview</h2>
+            </div>
+          </div>
+
+          <section class="prompt-block">
+            <h3>Positive Prompt</h3>
+            <pre id="positive-prompt">Select a preset or preview the prompt.</pre>
+          </section>
+
+          <section class="prompt-block">
+            <h3>Negative Prompt</h3>
+            <pre id="negative-prompt">Originality and mix rules will appear here.</pre>
+          </section>
+
+          <section class="panel-lite">
+            <h3>Structured Summary</h3>
+            <div id="summary-list" class="detail-grid"></div>
+          </section>
+
+          <section class="panel-lite">
+            <h3>Recommended Settings</h3>
+            <div id="settings-list" class="detail-grid"></div>
+          </section>
+
+          <section class="panel-lite">
+            <h3>Warnings</h3>
+            <ul id="warning-list" class="warning-list"></ul>
+          </section>
+
+          <section class="panel-lite">
+            <h3>Job Progress</h3>
+            <div id="job-progress" class="detail-grid"></div>
+            <p id="job-message" class="muted-text">No mock job has been generated.</p>
+          </section>
+
+          <section class="panel-lite">
+            <h3>Diagnostics Panel</h3>
+            <div id="diagnostics-grid" class="detail-grid"></div>
+            <pre id="diagnostic-logs" class="compact-log">No generation logs yet.</pre>
+          </section>
+
+          <section class="panel-lite">
+            <h3>Mix Diagnostics</h3>
+            <div id="mix-diagnostics-grid" class="detail-grid"></div>
+          </section>
+
+          <section class="panel-lite">
+            <h3>Quality Report</h3>
+            <div id="quality-grid" class="detail-grid"></div>
+          </section>
+
+          <section class="panel-lite">
+            <h3>Export Manifest</h3>
+            <div class="button-row">
+              <button id="export-manifest-button" class="secondary" type="button">Export Manifest</button>
+            </div>
+            <pre id="export-output" class="compact-log">Manifest export appears here.</pre>
+            <a id="manifest-link" class="inline-link" hidden>Open manifest</a>
+          </section>
+
+          <section class="panel-lite">
+            <h3>System Status</h3>
+            <button id="health-button" class="secondary" type="button">System Status</button>
+            <pre id="health-output" class="compact-log">Health details appear here.</pre>
+          </section>
+
+          <section class="panel-lite">
+            <h3>Cleanup</h3>
+            <button id="cleanup-button" class="secondary" type="button">Dry-run Cleanup</button>
+            <pre id="cleanup-output" class="compact-log">Cleanup dry-run appears here.</pre>
+          </section>
+        </article>
+      </section>
+    </main>
+
+    <script src="/studio-assets/studio.js?v=music-to-music-full-song-1"></script>
+  </body>
+</html>

@@ -1,0 +1,33 @@
+{
+  "name": "skarly-mobile",
+  "version": "0.1.0",
+  "private": true,
+  "main": "index.js",
+  "scripts": {
+    "start": "expo start",
+    "web": "expo start --web",
+    "android": "expo start --android",
+    "ios": "expo start --ios",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@babel/runtime": "^7.29.7",
+    "@expo/metro-runtime": "~4.0.1",
+    "expo": "~52.0.46",
+    "expo-asset": "~11.0.5",
+    "expo-av": "~15.0.2",
+    "expo-document-picker": "~13.0.3",
+    "expo-status-bar": "~2.0.1",
+    "firebase": "^12.14.0",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "react-native": "0.76.9",
+    "react-native-svg": "15.8.0",
+    "react-native-web": "~0.19.13"
+  },
+  "devDependencies": {
+    "@types/react": "~18.3.12",
+    "babel-preset-expo": "~12.0.12",
+    "typescript": "~5.3.3"
+  }
+}

@@ -1,0 +1,41 @@
+# Local dependency installs
+node_modules/
+.pydeps/
+.venv/
+.vscode/
+
+# Local secrets and offline runtime state
+.env
+.env.*
+!.env.offline.example
+*.log
+.local-storage/
+*.sqlite3
+
+# Python and Expo build/cache output
+__pycache__/
+*.py[cod]
+.expo/
+dist*/
+web-build/
+lyricmorph-mobile/dist*/
+
+# Generated local smoke-test audio
+lyricmorph-backend/sample-voice.wav
+lyricmorph-backend/offline-prototype-demo.mp3
+
+# Downloaded research datasets and generated backend audio/export workspaces
+lyricmorph-backend/data/fleurs/
+lyricmorph-backend/data/mmgenre/
+lyricmorph-backend/data/manifests/
+lyricmorph-backend/outputs/
+
+# Research inputs are supplied at runtime, never committed
+research/sample-audio.*
+research/artifacts/_analysis_input.wav
+
+# Local test/runtime workspaces
+.tmp-test*/
+lyricmorph-backend/.tmp-*/
+outputs/runtime-logs/
+tmp/

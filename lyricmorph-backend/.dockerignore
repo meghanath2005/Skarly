@@ -1,0 +1,11 @@
+.env
+.env.*
+!.env.offline.example
+.local-storage/
+.pydeps/
+.pytest_cache/
+__pycache__/
+*.py[cod]
+*.log
+offline-prototype-demo.mp3
+sample-voice.wav
