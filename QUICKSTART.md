@@ -1,6 +1,6 @@
 # Skarly quick start
 
-This guide starts the same local stack used for the verified guest run. It keeps all user audio and generated files local unless you deliberately configure cloud storage.
+This guide starts the same local stack used for the verified guest run. User audio and generated files stay in the configured local directories.
 
 ## Prerequisites
 
@@ -11,7 +11,7 @@ This guide starts the same local stack used for the verified guest run. It keeps
 - NVIDIA CUDA GPU for the release generation path
 - A working [ACE-Step 1.5](https://github.com/ace-step/ACE-Step-1.5) checkout and its model weights
 
-Optional analysis tools are Demucs, Basic Pitch, and Whisper. The web application can run without Firebase credentials in guest mode.
+Optional analysis tools are Demucs, Basic Pitch, and Whisper. The web application runs as a local guest studio.
 
 ## 1. Clone and configure
 

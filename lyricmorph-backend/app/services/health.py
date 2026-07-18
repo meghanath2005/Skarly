@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-import os
 import shlex
 import shutil
 from typing import Any
@@ -54,27 +53,6 @@ def build_full_health(
         "enabled": bool(getattr(settings, "producer_assistant_enabled", True)),
         "mode": getattr(settings, "producer_assistant_mode", "rules"),
     }
-    online_enabled = bool(getattr(settings, "online_music_enabled", True))
-    eleven_key = bool(getattr(settings, "elevenlabs_api_key", None))
-    gemini_key = bool(getattr(settings, "gemini_api_key", None))
-    checks["online_music"] = {
-        "ok": True,
-        "enabled": online_enabled,
-        "primary": getattr(settings, "music_provider_primary", "elevenlabs"),
-        "secondary": getattr(settings, "music_provider_secondary", "lyria"),
-        "elevenlabs_configured": eleven_key,
-        "lyria_configured": gemini_key,
-        "candidate_count": getattr(settings, "generate_candidate_count", 3),
-        "message": (
-            "Online providers configured."
-            if online_enabled and (eleven_key or gemini_key)
-            else "Online generation will use local_fallback until provider API keys are configured."
-            if online_enabled
-            else "Online music generation is disabled."
-        ),
-    }
-    if online_enabled and not (eleven_key or gemini_key):
-        warnings.append("No online music provider API key is configured; v2 generation will use local_fallback.")
     checks["stems"] = {
         "ok": True,
         "enabled": bool(getattr(settings, "stems_enabled", True)),

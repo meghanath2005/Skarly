@@ -377,7 +377,7 @@ def build_report():
 
     doc.add_heading("3. End-to-end procedure", level=1)
     for title, body in [
-        ("Private upload", "The client obtains an account- or guest-scoped upload path, transfers the audio, and verifies that it exists before analysis."),
+        ("Local upload", "The guest client transfers the selected audio to local storage and verifies that it exists before analysis."),
         ("Source preparation", "Vocal-only input is preserved. Full-song or music input is routed through Demucs when the selected mode requires separation."),
         ("Complete-song analysis", "The backend decodes the full duration, maps tempo, key, phrases, energy and structure, and aggregates learned predictions over contiguous windows."),
         ("Creator confirmation", "Language, style, BPM, key, mood, and mix focus remain visible. Weak genre evidence does not silently override the creator."),
@@ -408,7 +408,7 @@ def build_report():
     doc.add_heading("5. Neural network and CNN research", level=1)
     add_figure(doc, ARTIFACTS / "nn_cnn_comparison.png", "Figure 2. Legacy convolutional network compared with the current shared-encoder neural architecture.")
     add_body(doc, "The legacy network is useful pedagogically because its convolution kernels operate directly on local time-frequency shapes. The current direction is better aligned with the application: a pretrained music-audio encoder provides a richer representation, while only small task heads are trained. Frozen upstream weights also reduce the amount of project-specific data needed to learn useful routing decisions.")
-    add_figure(doc, ARTIFACTS / "cnn_training_curves.png", "Figure 3. Real training and grouped-validation curves exported from skarly_audio_cnn.pt.")
+    add_figure(doc, ARTIFACTS / "cnn_training_curves.png", "Figure 3. Real training and grouped-validation curves from the retained training-history export.")
     add_callout(doc, "Interpretation", "The selected legacy checkpoint reached 96.77% grouped-validation language accuracy and 54.35% broad-genre accuracy at epoch 15. The language result supports guarded routing; the genre result does not justify silent fine-grained style selection, so creator confirmation remains part of the product.", fill="FFF7E6", accent=GOLD)
 
     doc.add_heading("6. Case-study audio analysis", level=1)
@@ -422,8 +422,8 @@ def build_report():
     doc.add_heading("7. Live guest UI validation", level=1)
     add_body(doc, "The browser test used guest mode and the supplied audio through the normal UI. No API was bypassed for the user journey. Upload, analysis, producer selection, processing, version playback, library, profile, and export states were captured as PNG evidence in docs/ui-screenshots/.")
     for filename, caption in [
-        ("00-account-choice.png", "Figure 8. Account choice with guest entry and saved-account options."),
-        ("05-upload-selected.png", "Figure 9. Supplied audio selected and verified for the guest workflow."),
+        ("02-creator-setup.png", "Figure 8. Local creator setup."),
+        ("04-upload-empty.png", "Figure 9. Local audio input and mode selection."),
         ("06-audio-detected.png", "Figure 10. Complete-song detection evidence, including language, mood, tempo, timing, key, and readiness."),
         ("08-processing.png", "Figure 11. CUDA generation progress with five-stage status and device telemetry."),
     ]:
@@ -469,7 +469,7 @@ def build_report():
         "$env:SKARLY_AUDIO_PATH='C:\\path\\to\\permitted-audio.mp3'",
         "jupyter notebook .\\research\\Skarly_Audio_Intelligence_Research.ipynb",
     ])
-    add_callout(doc, "First-run expectation", "Model weights, GPU drivers, FFmpeg, Firebase credentials, and cloud resources are environment-specific. The offline example files document the minimum variables without committing secrets.", fill=GOLD_LIGHT, accent=GOLD)
+    add_callout(doc, "First-run expectation", "ACE-Step weights, GPU drivers, FFmpeg, and local tool paths are environment-specific. The offline example files document the minimum variables without committing secrets.", fill=GOLD_LIGHT, accent=GOLD)
 
     doc.add_heading("11. Conclusion", level=1)
     add_body(doc, "The project now reads as a research internship build rather than only a product demo: the complete workflow is evidenced, the neural and convolutional paths are explained, real checkpoint curves are plotted, a permitted audio case study is reproducible, the user interface is catalogued, and the working generator boundaries remain intact. The strongest technical design choice is separation of concerns: analysis informs routing, ACE-Step generates new backings, the original singer is protected in mixing, and quality gates stay explicit about what is and is not production-calibrated.")

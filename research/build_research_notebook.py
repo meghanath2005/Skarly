@@ -382,7 +382,7 @@ plt.show()
             """
 ## 8. Real checkpoint training curves
 
-The plot below reads the metadata exported from `skarly_audio_cnn.pt`; it is not a simulated learning curve. Because the broad-genre prior is weaker and rights-cleared Hindi genre coverage remains limited, Skarly retains creator confirmation and uses stricter confidence gates. The checkpoint selection used the grouped validation metrics, with excerpts from one recording kept on the same side of the split.
+The plot below reads the retained training-history export; it is not a simulated learning curve. Because the broad-genre prior is weaker and rights-cleared Hindi genre coverage remains limited, Skarly retains creator confirmation and uses stricter confidence gates. The checkpoint selection used the grouped validation metrics, with excerpts from one recording kept on the same side of the split.
 """
         ),
         code(
@@ -420,7 +420,7 @@ plt.show()
             """
 ## 9. Procedure: how one upload becomes five final versions
 
-1. **Private upload:** the client requests a signed/private path and verifies that the upload exists.
+1. **Local upload:** the guest client transfers the selected audio to local storage and verifies that it exists.
 2. **Source routing:** vocal-only audio is preserved; full-song/music input is separated with Demucs according to the chosen mode.
 3. **Complete-song analysis:** tempo, key, phrases, energy, lyric/language evidence, melody, and shared-encoder predictions are aggregated across the decoded duration.
 4. **Creator confirmation:** low-confidence genre/key/language decisions remain visible and editable; training contribution is off by default.

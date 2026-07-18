@@ -1,10 +1,8 @@
 from app.models import ArrangementMode, CreatorMode, Genre, JobRecord, JobStatus, ProductionStyle, SongAnalysis, SourceType, now_utc
 from app.repository import InMemoryJobRepository
 from app.storage import MockStorageService
-import base64
 
 from app.config import Settings
-from app.repository import InMemoryUsageRepository
 from app.worker import (
     MockAIWorker,
     MvpAudioWorker,
@@ -17,10 +15,8 @@ from app.worker import (
     create_music_bed,
     create_music_bed_with_report,
     extract_ace_audio_url,
-    extract_lyria_audio,
     fallback_song_analysis,
-    lyria_prompt,
-    reserve_lyria_generation,
+    backing_prompt,
     tool_dependency_env,
 )
 import io
@@ -82,7 +78,7 @@ def test_mock_worker_completes_job_and_deletes_raw_audio():
     job = JobRecord(
         job_id="job_test",
         user_id="user_test",
-        creator_mode=CreatorMode.saved,
+        creator_mode=CreatorMode.guest,
         genre=Genre.lofi,
         track_name="Ocean Demo",
         source_type=SourceType.local_upload,
@@ -138,7 +134,7 @@ def test_mvp_audio_worker_outputs_real_mp3_bytes(monkeypatch):
         JobRecord(
             job_id="job_audio",
             user_id="user_test",
-            creator_mode=CreatorMode.saved,
+            creator_mode=CreatorMode.guest,
             genre=Genre.hiphop,
             production_style=ProductionStyle.bollywood_ballad,
             arrangement_style="Piano-led cinematic",
@@ -316,7 +312,7 @@ def test_full_song_upload_runs_vocal_isolation_before_generation(monkeypatch):
         JobRecord(
             job_id="job_upload_mix",
             user_id="user_test",
-            creator_mode=CreatorMode.saved,
+            creator_mode=CreatorMode.guest,
             genre=Genre.rnb,
             track_name="Isolated Demo",
             source_type=SourceType.local_upload,
@@ -374,7 +370,7 @@ def test_vocal_upload_skips_demucs_in_vocal_to_song_mode(monkeypatch):
         JobRecord(
             job_id="job_vocal_upload",
             user_id="user_test",
-            creator_mode=CreatorMode.saved,
+            creator_mode=CreatorMode.guest,
             genre=Genre.pop,
             track_name="Vocal Upload Demo",
             source_type=SourceType.local_upload,
@@ -418,7 +414,7 @@ def test_recording_skips_vocal_isolation(monkeypatch):
         JobRecord(
             job_id="job_recording",
             user_id="user_test",
-            creator_mode=CreatorMode.saved,
+            creator_mode=CreatorMode.guest,
             genre=Genre.pop,
             track_name="Recorded Demo",
             source_type=SourceType.recording,
@@ -459,7 +455,7 @@ def test_music_to_music_generates_new_instrumental_without_vocal_isolation(monke
         JobRecord(
             job_id="job_music_only",
             user_id="user_test",
-            creator_mode=CreatorMode.saved,
+            creator_mode=CreatorMode.guest,
             genre=Genre.rock,
             track_name="Music Remake",
             source_type=SourceType.local_upload,
@@ -514,7 +510,7 @@ def test_full_song_vocal_isolation_failure_stops_generation(monkeypatch):
         JobRecord(
             job_id="job_failed_isolation",
             user_id="user_test",
-            creator_mode=CreatorMode.saved,
+            creator_mode=CreatorMode.guest,
             genre=Genre.rock,
             track_name="Failed Demo",
             source_type=SourceType.local_upload,
@@ -570,7 +566,7 @@ def test_ace_backing_cleanup_failure_continues_with_uncleaned_bed(monkeypatch):
         JobRecord(
             job_id="job_backing_cleanup",
             user_id="user_test",
-            creator_mode=CreatorMode.saved,
+            creator_mode=CreatorMode.guest,
             genre=Genre.hiphop,
             track_name="Cleanup Demo",
             source_type=SourceType.recording,
@@ -616,7 +612,7 @@ def test_mvp_audio_worker_fails_when_ffmpeg_is_missing(monkeypatch):
         JobRecord(
             job_id="job_audio",
             user_id="user_test",
-            creator_mode=CreatorMode.saved,
+            creator_mode=CreatorMode.guest,
             genre=Genre.rnb,
             track_name="Smooth Demo",
             source_type=SourceType.recording,
@@ -660,47 +656,8 @@ def test_procedural_v2_generator_creates_stereo_wav(tmp_path):
         assert wav.getnframes() > 0
 
 
-def test_lyria_usage_guard_blocks_after_limit(monkeypatch):
-    isolated_usage = InMemoryUsageRepository()
-    monkeypatch.setattr("app.worker.usage", isolated_usage)
-    monkeypatch.setattr("app.worker.settings", Settings(music_generator_backend="lyria", lyria_monthly_limit=1))
-
-    assert reserve_lyria_generation() == 1
-    try:
-        reserve_lyria_generation()
-    except RuntimeError as exc:
-        assert "Lyria generation limit reached" in str(exc)
-    else:
-        raise AssertionError("Lyria guard should stop after the limit")
-
-
-def test_lyria_failure_can_fallback_to_procedural(tmp_path, monkeypatch):
-    output = tmp_path / "fallback.wav"
-    isolated_usage = InMemoryUsageRepository()
-    monkeypatch.setattr("app.worker.usage", isolated_usage)
-    monkeypatch.setattr(
-        "app.worker.settings",
-        Settings(music_generator_backend="lyria", lyria_fallback_to_procedural=True, lyria_monthly_limit=25),
-    )
-    monkeypatch.setattr("app.worker.create_lyria_bed", lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("Lyria 404")))
-
-    create_music_bed(output, Genre.rock, "job_test", seconds=0.2, sample_rate=8000)
-
-    assert output.exists()
-    assert isolated_usage.get("lyria_2026_01") == 0
-    with wave.open(str(output), "rb") as wav:
-        assert wav.getnframes() > 0
-
-
-def test_lyria_audio_extractor_handles_nested_base64():
-    encoded = base64.b64encode(b"real-audio-bytes" * 20).decode("ascii")
-    data = {"predictions": [{"audio": {"audioContent": encoded}}]}
-
-    assert extract_lyria_audio(data).startswith(b"real-audio-bytes")
-
-
-def test_lyria_prompt_is_instrumental_and_genre_specific():
-    prompt = lyria_prompt(Genre.hiphop, 30, {"tempo_bpm": 92})
+def test_backing_prompt_is_instrumental_and_genre_specific():
+    prompt = backing_prompt(Genre.hiphop, 30, {"tempo_bpm": 92})
 
     assert "Hip-hop" in prompt
     assert "No lead vocals" in prompt
@@ -710,7 +667,7 @@ def test_lyria_prompt_is_instrumental_and_genre_specific():
 
 def test_genre_prompts_are_style_specific_without_artist_names():
     prompts = {
-        genre: lyria_prompt(genre, 30)
+        genre: backing_prompt(genre, 30)
         for genre in (Genre.pop, Genre.hiphop, Genre.rnb, Genre.acoustic, Genre.cinematic, Genre.rock, Genre.lofi, Genre.piano)
     }
 

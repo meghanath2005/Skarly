@@ -36,7 +36,6 @@ def local_capabilities() -> dict[str, Any]:
         "prototype_mode": {
             "storage_backend": settings.storage_backend,
             "repository_backend": settings.repository_backend,
-            "task_backend": settings.task_backend,
         },
         "timeouts": {
             "analysis_timeout_sec": settings.analysis_timeout_sec,

@@ -93,7 +93,7 @@ def main() -> None:
         "file_size": output.stat().st_size if output.exists() else 0,
         "ffprobe_duration": media_duration_seconds(output, settings.ffmpeg_path),
         "success": bool(report.get("final_generator_used")),
-        "failure_reason": report.get("ace_step_error") or report.get("lyria_error"),
+        "failure_reason": report.get("ace_step_error"),
         "generation_report": report,
     }
     print(json.dumps(summary, indent=2))

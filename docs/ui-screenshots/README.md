@@ -1,17 +1,14 @@
 # Skarly UI evidence catalogue
 
-These 25 screenshots were captured at 1280×720 from the live Expo web application in guest mode on 18 July 2026. The supplied audio was selected through the normal file picker and was not added to the repository.
+These 22 screenshots were captured at 1280 x 720 from the live Expo web application in guest mode on 18 July 2026. The supplied audio was selected through the normal file picker and was not added to the repository.
 
 ## Guest journey and input
 
 | File | UI state |
 | --- | --- |
-| [00-account-choice.png](00-account-choice.png) | Account choice / launch state |
-| [01-guest-entry.png](01-guest-entry.png) | Guest entry |
 | [02-creator-setup.png](02-creator-setup.png) | Creator setup |
 | [03-home.png](03-home.png) | Guest home |
 | [04-upload-empty.png](04-upload-empty.png) | Empty upload form |
-| [05-upload-selected.png](05-upload-selected.png) | Attached MP3 selected and verified |
 | [06-audio-analyzing.png](06-audio-analyzing.png) | Complete-song analysis in progress |
 | [06-audio-detected.png](06-audio-detected.png) | Detected language, mood, vocal, tempo, key, phrases, and sections |
 | [07-producer-selection.png](07-producer-selection.png) | Five-producer selection |

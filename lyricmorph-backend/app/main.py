@@ -17,12 +17,10 @@ from .generators import ace_step, procedural_v2
 from .local_ai import agent_generation_plan, local_capabilities
 from .mixer import MIXER_NAME, MixResult, mix_vocal_with_backing, resolve_output_dir as resolve_mix_output_dir
 from .models import (
-    AdminSummaryResponse,
     ArrangementMode,
     AppHealthResponse,
     AudioExport,
     AudioUploadResponse,
-    CloudRuntimeSnapshot,
     CleanupRequest,
     CleanupResponse,
     CreateJobRequest,
@@ -41,8 +39,6 @@ from .models import (
     MixDiagnostics,
     MixRequest,
     MixResponse,
-    MusicToMusicRequest,
-    OnlineGenerationResponse,
     PromptPreviewRequest,
     ProjectCreateRequest,
     ProjectListResponse,
@@ -53,9 +49,7 @@ from .models import (
     QualityReport,
     QualityExplanationRequest,
     QualityExplanationResponse,
-    CloudCostSnapshot,
     RecycleBinResponse,
-    RegenerateMusicRequest,
     SignedUploadRequest,
     SignedUploadResponse,
     SkarlyStudioAnalyzeRequest,
@@ -83,14 +77,11 @@ from .models import (
     UploadVerificationResponse,
     UpdateJobLibraryRequest,
     UserContext,
-    UserProfileRequest,
-    UserProfileResponse,
     VoiceTakeListResponse,
     VoiceTakePlaybackResponse,
     VoiceTakeRequest,
     VoiceTakeResponse,
     VocalAnalysisReport,
-    VocalToMusicRequest,
     Genre,
     SourceType,
     new_id,
@@ -105,13 +96,13 @@ from .presets import (
     get_preset_by_id,
 )
 from .prompt_builder import build_generation_prompt
-from .repository import DuplicateEmailError, jobs, usage, users, voice_takes
+from .repository import jobs, usage, voice_takes
 from .services import jobs as producer_jobs
 from .services import cleanup as cleanup_service
 from .services import exports as export_service
 from .services import health as health_service
 from .services import projects as project_service
-from .services import benchmark_evidence, diversity_calibration, human_validation as human_validation_service, online_job_store, online_music, safe_paths, section_editor, skarly_studio, stems as stems_service, studio_v2_exports, studio_v2_jobs, training_feedback, uploads as upload_service, vocal_analysis
+from .services import benchmark_evidence, diversity_calibration, human_validation as human_validation_service, safe_paths, section_editor, skarly_studio, stems as stems_service, studio_v2_exports, studio_v2_jobs, training_feedback, uploads as upload_service, vocal_analysis
 from .services.producer_assistant import (
     analyze_request_placeholder,
     compile_producer_prompt,
@@ -147,9 +138,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-static_dir = Path(__file__).resolve().parent / "static"
-if static_dir.exists():
-    app.mount("/studio-assets", StaticFiles(directory=static_dir), name="studio-assets")
 ace_step_output_dir = ace_step.resolve_output_dir(settings.ace_step_output_dir)
 ace_step_output_dir.mkdir(parents=True, exist_ok=True)
 app.mount("/outputs/ace_step", StaticFiles(directory=ace_step_output_dir), name="ace-step-outputs")
@@ -174,25 +162,10 @@ app.mount("/outputs/exports", StaticFiles(directory=exports_output_dir), name="e
 uploads_output_dir = safe_paths.resolve_output_dir(settings.uploads_dir)
 uploads_output_dir.mkdir(parents=True, exist_ok=True)
 app.mount("/outputs/uploads", StaticFiles(directory=uploads_output_dir), name="upload-outputs")
-online_music_output_dir = safe_paths.resolve_output_dir(settings.online_music_output_dir)
-online_music_output_dir.mkdir(parents=True, exist_ok=True)
-app.mount("/outputs/online_music", StaticFiles(directory=online_music_output_dir), name="online-music-outputs")
 skarly_output_dir = safe_paths.resolve_output_dir(settings.skarly_output_dir)
 skarly_output_dir.mkdir(parents=True, exist_ok=True)
 app.mount("/outputs/skarly", StaticFiles(directory=skarly_output_dir), name="skarly-outputs")
 worker = build_worker(jobs)
-
-
-def require_admin_user(user: UserContext = Depends(get_current_user)) -> UserContext:
-    email = (user.email or "").strip().lower()
-    uid = user.user_id.strip()
-    if settings.admin_emails or settings.admin_uids:
-        if (email and email in settings.admin_emails) or (uid and uid in settings.admin_uids):
-            return user
-        raise HTTPException(status_code=403, detail="Admin access required")
-    if settings.app_env == "local":
-        return user
-    raise HTTPException(status_code=403, detail="Admin access required")
 
 
 @app.get("/health")
@@ -228,12 +201,6 @@ def health():
         "exports_dir": str(safe_paths.resolve_output_dir(settings.exports_dir)),
         "uploads_dir": str(safe_paths.resolve_output_dir(settings.uploads_dir)),
         "output_retention_days": settings.output_retention_days,
-        "online_music_enabled": settings.online_music_enabled,
-        "music_provider_primary": settings.music_provider_primary,
-        "music_provider_secondary": settings.music_provider_secondary,
-        "online_music_output_dir": str(safe_paths.resolve_output_dir(settings.online_music_output_dir)),
-        "generate_candidate_count": settings.generate_candidate_count,
-        "require_rights_confirmation": settings.require_rights_confirmation,
         "stems_enabled": settings.stems_enabled,
         "stems_engine": settings.stems_engine,
         "stems_output_dir": str(stems_service.resolve_output_dir(settings.stems_output_dir)),
@@ -258,8 +225,6 @@ def health():
             "export_timeout_sec": settings.export_timeout_sec,
             "studio_poll_timeout_sec": settings.studio_poll_timeout_sec,
         },
-        "task_backend": settings.task_backend,
-        "cloud_runtime": _cloud_runtime_snapshot().model_dump(),
     }
 
 
@@ -270,11 +235,6 @@ def full_health():
         output_dirs=_configured_output_dirs(),
         version=app.version,
     )
-
-
-@app.get("/studio")
-def studio():
-    return FileResponse(static_dir / "studio.html")
 
 
 @app.get("/ace-step/health")
@@ -528,27 +488,7 @@ def _create_ace_step_generation_job(request: PromptPreviewRequest, preview: dict
 def get_mock_job(job_id: str):
     job = producer_jobs.get_job(job_id)
     if job is None:
-        online_payload = online_job_store.load(settings.online_music_output_dir, job_id)
-        if online_payload:
-            response = OnlineGenerationResponse.model_validate(online_payload)
-            best = response.best_candidate
-            job = {
-                "job_id": job_id,
-                "status": response.status,
-                "progress": 1.0,
-                "message": response.message,
-                "generation_mode": response.mode,
-                "generated_audio_path": best.backing_audio_path if best else None,
-                "audio_url": (best.mixed_preview_url or best.backing_audio_url) if best else None,
-                "preview_url": (best.mixed_preview_url or best.backing_audio_url) if best else None,
-                "backing_audio_path": best.backing_audio_path if best else None,
-                "backing_audio_url": best.backing_audio_url if best else None,
-                "mixed_preview_path": best.mixed_preview_path if best else None,
-                "mixed_preview_url": best.mixed_preview_url if best else None,
-                "online_response": online_payload,
-            }
-        else:
-            raise HTTPException(status_code=404, detail="Job not found")
+        raise HTTPException(status_code=404, detail="Job not found")
     return _producer_job_response(job)
 
 
@@ -1183,81 +1123,6 @@ def select_skarly_version(
         raise HTTPException(status_code=400, detail=str(exc))
 
 
-@app.post("/v2/vocal-to-music", response_model=OnlineGenerationResponse)
-def vocal_to_music(request: VocalToMusicRequest):
-    created = producer_jobs.create_job(
-        {
-            "status": "generating",
-            "progress": 0.15,
-            "message": "Vocal-to-music generation started.",
-            "generation_mode": "online_vocal_to_music",
-            "online_request": request.model_dump(mode="json"),
-        }
-    )
-    response = online_music.run_vocal_to_music(
-        request,
-        job_id=created["job_id"],
-        settings=settings,
-        upload_lookup=_lookup_upload,
-        url_for_path=_known_output_url,
-    )
-    _store_online_generation_response(response)
-    return response
-
-
-@app.post("/v2/music-to-music", response_model=OnlineGenerationResponse)
-def music_to_music(request: MusicToMusicRequest):
-    created = producer_jobs.create_job(
-        {
-            "status": "generating",
-            "progress": 0.15,
-            "message": "Music-to-music generation started.",
-            "generation_mode": "online_music_to_music",
-            "online_request": request.model_dump(mode="json"),
-        }
-    )
-    response = online_music.run_music_to_music(
-        request,
-        job_id=created["job_id"],
-        settings=settings,
-        upload_lookup=_lookup_upload,
-        url_for_path=_known_output_url,
-    )
-    _store_online_generation_response(response)
-    return response
-
-
-@app.post("/v2/jobs/{job_id}/regenerate", response_model=OnlineGenerationResponse)
-def regenerate_online_candidate(job_id: str, request: RegenerateMusicRequest):
-    previous = producer_jobs.get_job(job_id)
-    online_payload = previous.get("online_response") if previous else None
-    if not online_payload:
-        online_payload = online_job_store.load(settings.online_music_output_dir, job_id)
-    if not online_payload:
-        raise HTTPException(status_code=404, detail="Online generation job not found")
-    previous_response = OnlineGenerationResponse.model_validate(online_payload)
-    created = producer_jobs.create_job(
-        {
-            "status": "regenerating",
-            "progress": 0.15,
-            "message": "Candidate regeneration started.",
-            "generation_mode": f"{previous_response.mode}_regenerate",
-            "source_online_job_id": job_id,
-            "online_request": request.model_dump(mode="json"),
-        }
-    )
-    response = online_music.regenerate_online_job(
-        previous_response=previous_response,
-        request=request,
-        settings=settings,
-        upload_lookup=_lookup_upload,
-        url_for_path=_known_output_url,
-        job_id=created["job_id"],
-    )
-    _store_online_generation_response(response)
-    return response
-
-
 @app.post("/projects", response_model=ProjectResponse)
 def create_project(request: ProjectCreateRequest):
     if not settings.projects_enabled:
@@ -1539,53 +1404,6 @@ async def local_agent(request: Request):
     return agent_generation_plan(await request.json())
 
 
-@app.get("/v1/admin/summary", response_model=AdminSummaryResponse)
-def admin_summary(user: UserContext = Depends(require_admin_user)):
-    recent_jobs = jobs.list_recent(30)
-    recent_voice_takes = voice_takes.list_recent(30)
-    deleted_jobs = jobs.list_deleted_recent(30)
-    deleted_voice_takes = voice_takes.list_deleted_recent(30)
-    users_snapshot = users.list_recent(30)
-    failed_jobs = [job for job in recent_jobs if job.status == JobStatus.failed]
-    ready_jobs = [job for job in recent_jobs if job.status == JobStatus.ready]
-    uploaded_takes = [take for take in recent_voice_takes if take.raw_audio_path]
-    usage_key = _current_lyria_usage_key()
-    generation_count = usage.get(usage_key)
-    return AdminSummaryResponse(
-        environment=settings.app_env,
-        repository_backend=settings.repository_backend,
-        storage_backend=settings.storage_backend,
-        worker_backend=settings.worker_backend,
-        music_generator_backend=settings.music_generator_backend,
-        task_backend=settings.task_backend,
-        bucket=settings.storage_bucket,
-        users=users_snapshot,
-        recent_jobs=recent_jobs,
-        recent_voice_takes=recent_voice_takes,
-        deleted_jobs=deleted_jobs,
-        deleted_voice_takes=deleted_voice_takes,
-        counts={
-            "users": len(users_snapshot),
-            "recent_jobs": len(recent_jobs),
-            "ready_jobs": len(ready_jobs),
-            "failed_jobs": len(failed_jobs),
-            "voice_takes": len(recent_voice_takes),
-            "uploaded_voice_takes": len(uploaded_takes),
-            "deleted_jobs": len(deleted_jobs),
-            "deleted_voice_takes": len(deleted_voice_takes),
-        },
-        cloud_cost=CloudCostSnapshot(
-            period=usage_key.removeprefix("lyria_"),
-            generations=generation_count,
-            generation_limit=settings.lyria_monthly_limit,
-            estimated_cost_usd=round(generation_count * settings.lyria_unit_cost_usd, 2),
-            unit_cost_usd=settings.lyria_unit_cost_usd,
-            generator_backend=settings.music_generator_backend,
-        ),
-        cloud_runtime=_cloud_runtime_snapshot(),
-    )
-
-
 @app.post("/v1/uploads/sign", response_model=SignedUploadResponse)
 def sign_upload(request: SignedUploadRequest, user: UserContext = Depends(get_current_user)):
     return storage.create_signed_upload(storage_owner_id(user), request)
@@ -1645,23 +1463,6 @@ async def upload_bytes(
         raise HTTPException(status_code=413, detail="Audio file is larger than the 20 MB prototype limit")
     storage.upload_bytes(raw_audio_path, data, content_type)
     return UploadVerificationResponse(raw_audio_path=raw_audio_path, exists=True)
-
-
-@app.get("/v1/me", response_model=UserProfileResponse)
-def get_profile(user: UserContext = Depends(get_current_user)):
-    profile = users.get(user.user_id)
-    if profile is None:
-        raise HTTPException(status_code=404, detail="Profile not found")
-    return UserProfileResponse(profile=profile)
-
-
-@app.put("/v1/me", response_model=UserProfileResponse)
-def save_profile(request: UserProfileRequest, user: UserContext = Depends(get_current_user)):
-    try:
-        profile = users.upsert(user.user_id, request)
-    except DuplicateEmailError:
-        raise HTTPException(status_code=409, detail="Email already registered")
-    return UserProfileResponse(profile=profile)
 
 
 @app.post("/v1/jobs", response_model=JobResponse)
@@ -1840,15 +1641,6 @@ def delete_track(track_id: str, user: UserContext = Depends(get_current_user)):
     return JobResponse(job=jobs.mark_deleted(track_id))
 
 
-@app.post("/v1/library/cleanup-stale", response_model=HistoryResponse)
-def cleanup_stale_library(user: UserContext = Depends(require_admin_user)):
-    cleaned: list[JobRecord] = []
-    for job in jobs.list_for_user(user.user_id):
-        if _is_stale_library_job(job):
-            cleaned.append(jobs.mark_deleted(job.job_id))
-    return HistoryResponse(tracks=cleaned)
-
-
 @app.post("/v1/tracks/{track_id}/restore", response_model=JobResponse)
 def restore_track(track_id: str, user: UserContext = Depends(get_current_user)):
     _require_owned_job(track_id, user)
@@ -1878,8 +1670,7 @@ def delete_raw(job_id: str, user: UserContext = Depends(get_current_user)):
 
 
 @app.post("/v1/worker/jobs/{job_id}/run", response_model=JobResponse)
-def run_worker_job(job_id: str, x_skarly_worker_secret: str | None = Header(default=None)):
-    _require_worker_access(x_skarly_worker_secret)
+def run_worker_job(job_id: str):
     try:
         job = worker.run_job(job_id)
     except KeyError:
@@ -1931,73 +1722,6 @@ def _producer_job_response(job: dict) -> JobStatusResponse:
 
 def _lookup_upload(upload_id: str) -> AudioUploadResponse | None:
     return upload_service.get_upload(upload_id, uploads_dir=settings.uploads_dir, url_for_path=_known_output_url)
-
-
-def _store_online_generation_response(response: OnlineGenerationResponse) -> dict:
-    best = response.best_candidate
-    quality_report = None
-    if best:
-        quality_report = best.mix_quality_report or best.quality_report
-    audio_export = AudioExport(
-        backing_audio_path=best.backing_audio_path if best else None,
-        backing_audio_url=best.backing_audio_url if best else None,
-        mixed_preview_path=best.mixed_preview_path if best else None,
-        mixed_preview_url=best.mixed_preview_url if best else None,
-        final_mix_wav_path=best.final_mix_wav_path if best else None,
-        final_mix_mp3_path=best.final_mix_mp3_path if best else None,
-        final_mix_mp3_url=best.final_mix_mp3_url if best else None,
-        final_wav_path=best.final_mix_wav_path if best else None,
-        final_mp3_path=best.final_mix_mp3_path if best else None,
-        quality_report=quality_report,
-        backing_quality_report=best.quality_report if best else None,
-    )
-    serialized_response = response.model_dump(mode="json")
-    online_job_store.save(settings.online_music_output_dir, response.job_id, serialized_response)
-    return producer_jobs.update_job(
-        response.job_id,
-        {
-            "status": response.status,
-            "progress": 1.0,
-            "message": response.message,
-            "generation_mode": response.mode,
-            "generated_audio_path": best.backing_audio_path if best else None,
-            "audio_url": best.mixed_preview_url or best.backing_audio_url if best else None,
-            "preview_url": best.mixed_preview_url or best.backing_audio_url if best else None,
-            "backing_audio_path": best.backing_audio_path if best else None,
-            "backing_audio_url": best.backing_audio_url if best else None,
-            "mixed_preview_path": best.mixed_preview_path if best else None,
-            "mixed_preview_url": best.mixed_preview_url if best else None,
-            "final_mix_wav_path": best.final_mix_wav_path if best else None,
-            "final_mix_mp3_path": best.final_mix_mp3_path if best else None,
-            "final_mix_mp3_url": best.final_mix_mp3_url if best else None,
-            "positive_prompt": response.composition_plan.provider_prompt if response.composition_plan else None,
-            "negative_prompt": response.composition_plan.negative_prompt if response.composition_plan else None,
-            "structured_summary": response.composition_plan.model_dump(mode="json") if response.composition_plan else None,
-            "recommended_settings": _online_recommended_settings(response),
-            "diagnostics": response.diagnostics.model_dump(mode="json") if response.diagnostics else None,
-            "quality_report": quality_report.model_dump(mode="json") if quality_report else None,
-            "audio_export": audio_export.model_dump(mode="json"),
-            "online_response": serialized_response,
-        },
-    )
-
-
-def _online_recommended_settings(response: OnlineGenerationResponse) -> dict:
-    plan = response.composition_plan
-    if not plan:
-        return {}
-    return {
-        "provider_order": list(plan.provider_preferences),
-        "bpm": plan.bpm,
-        "key": plan.key,
-        "duration_seconds": plan.duration_seconds,
-        "production_style": plan.production_style,
-        "arrangement_style": plan.arrangement_style,
-        "instruments": list(plan.instruments),
-        "mix_direction": plan.mix_direction,
-        "best_candidate_id": response.best_candidate.candidate_id if response.best_candidate else None,
-        "best_provider": response.best_candidate.provider_name if response.best_candidate else None,
-    }
 
 
 def _complete_generated_backing(
@@ -3605,7 +3329,6 @@ def _known_output_url(output_path: str | None) -> str | None:
         (lambda: safe_paths.resolve_output_dir(settings.projects_dir), "/outputs/projects"),
         (lambda: safe_paths.resolve_output_dir(settings.exports_dir), "/outputs/exports"),
         (lambda: safe_paths.resolve_output_dir(settings.uploads_dir), "/outputs/uploads"),
-        (lambda: safe_paths.resolve_output_dir(settings.online_music_output_dir), "/outputs/online_music"),
         (lambda: safe_paths.resolve_output_dir(settings.skarly_output_dir), "/outputs/skarly"),
     ):
         try:
@@ -3627,7 +3350,6 @@ def _configured_output_dirs() -> dict[str, str]:
         "projects": settings.projects_dir,
         "exports": settings.exports_dir,
         "uploads": settings.uploads_dir,
-        "online_music": settings.online_music_output_dir,
         "skarly": settings.skarly_output_dir,
     }
 
@@ -3645,9 +3367,6 @@ def _app_export_summary() -> dict:
         "stems_enabled": settings.stems_enabled,
         "section_editing_mode": settings.section_editing_mode,
         "producer_assistant_mode": settings.producer_assistant_mode,
-        "online_music_enabled": settings.online_music_enabled,
-        "music_provider_primary": settings.music_provider_primary,
-        "music_provider_secondary": settings.music_provider_secondary,
     }
 
 
@@ -3701,11 +3420,8 @@ def _dedupe_strings(values: list[str]) -> list[str]:
 
 
 def _enqueue_generation(job_id: str, background_tasks: BackgroundTasks) -> None:
-    if settings.task_backend == "inline":
-        task_queue.enqueue_generation(job_id)
-        background_tasks.add_task(_run_worker_safely, job_id)
-        return
     task_queue.enqueue_generation(job_id)
+    background_tasks.add_task(_run_worker_safely, job_id)
 
 
 def _run_worker_safely(job_id: str) -> None:
@@ -3718,14 +3434,6 @@ def _run_worker_safely(job_id: str) -> None:
             jobs.update_status(job_id, JobStatus.failed, "failed", str(exc))
         except Exception:
             pass
-
-
-def _require_worker_access(worker_secret: str | None) -> None:
-    if settings.task_backend == "inline" and settings.app_env == "local" and not settings.worker_shared_secret:
-        return
-    if settings.worker_shared_secret and worker_secret == settings.worker_shared_secret:
-        return
-    raise HTTPException(status_code=401, detail="Worker access required")
 
 
 def _require_owned_job(job_id: str, user: UserContext) -> JobRecord:
@@ -4020,25 +3728,3 @@ def _delete_storage_object_if_present(object_path: str | None) -> None:
 def _require_local_storage_backend() -> None:
     if settings.storage_backend not in {"local", "filesystem", "mock"}:
         raise HTTPException(status_code=404, detail="Local storage routes are disabled")
-
-
-def _current_lyria_usage_key() -> str:
-    return f"lyria_{now_utc().strftime('%Y_%m')}"
-
-
-def _cloud_runtime_snapshot() -> CloudRuntimeSnapshot:
-    service = os.getenv("K_SERVICE") or "local-fastapi"
-    revision = os.getenv("K_REVISION") or "local"
-    runtime = "cloud_run" if os.getenv("K_SERVICE") else "local"
-    return CloudRuntimeSnapshot(
-        runtime=runtime,
-        service=service,
-        revision=revision,
-        region=settings.gcp_location,
-        project_id=settings.gcp_project_id,
-        service_url=os.getenv("SKARLY_PUBLIC_BACKEND_URL") or settings.worker_url,
-        worker_url=settings.worker_url,
-        task_queue=settings.cloud_tasks_queue,
-        storage_bucket=settings.storage_bucket,
-        cors_origins=list(settings.cors_origins),
-    )

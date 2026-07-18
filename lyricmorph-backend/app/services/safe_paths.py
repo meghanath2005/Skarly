@@ -16,7 +16,6 @@ DEFAULT_ALLOWED_RELATIVE_DIRS = (
     "outputs/projects",
     "outputs/exports",
     "outputs/uploads",
-    "outputs/online_music",
     "outputs/skarly",
 )
 
